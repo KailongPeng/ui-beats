@@ -12,12 +12,12 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 class BeatConfig:
     project_name: str = "pwave_detection"
     run_name: Optional[str] = None
-    offline: bool = False
+    offline: bool = True
 
     training_type: str = "qrs"
     model_type: str = "multi_head"
 
-    batch_size: int = 400
+    batch_size: int = 32
     epochs: int = 100
     log_interval: int = 10
     early_stop_patience: int = 10
@@ -27,8 +27,8 @@ class BeatConfig:
     theta_lr: float = 1e-3
     delta_lr: float = 1e-3
 
-    dataset_root: Path = field(default_factory=lambda: BASE_DIR / "data")
-    log_dir: Path = field(default_factory=lambda: BASE_DIR / "experiments" / "pwave_detection" / "logs")
+    dataset_root: Path = field(default_factory=lambda: Path("/home/kailong/ECG/ECG/data/PN-QRS/CPSC2019"))
+    log_dir: Path = field(default_factory=lambda: Path("/home/kailong/ECG/ECG/ECGFounder/PN-QRS/experiments/logs"))
     model_save_dir: Optional[Path] = None
 
     sweep: bool = False
