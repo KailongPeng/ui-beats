@@ -1,0 +1,27 @@
+Device: cuda:0
+Checkpoint: /home/kailong/ECG/ECG/ECGFounder/PN-QRS/experiments/logs_real/zy2lki18/models/best_model.pt
+LTDB dir: /home/kailong/ECG/ECG/data/PN-QRS/LTDB
+WIN=10s  STRIDE=8s  OVERLAP=2s  TOL=150ms=19samp @ 128Hz
+Chunk size: 3600s = 1 hour
+
+Records with .dat: 7 total, processing 1: ['14184']
+
+  Processing 14184...
+    14184 chunk 4: 4/22h  pred_so_far=23636
+    14184 chunk 8: 8/22h  pred_so_far=46251
+    14184 chunk 12: 12/22h  pred_so_far=68228
+    14184 chunk 16: 16/22h  pred_so_far=88759
+    14184 chunk 20: 20/22h  pred_so_far=111154
+  14184 (22h): TP=101363  FP=2  FN=180  ref=101543  Se=99.82%  P+=100.00%  F1=99.91%
+
+===== LTDB Single-Lead QRS Evaluation =====
+  Records: 1
+  TP=101363  FP=2  FN=180
+  Se  = 0.9982  (99.82%)
+  P+  = 1.0000  (100.00%)
+  F1  = 0.9991  (99.91%)
+===========================================
+
+  MIT-BIH v2 (reference): Se=99.51%  P+=99.88%  F1=99.69%
+  LTDB (this run):         Se=99.82%  P+=100.00%  F1=99.91%
+  dF1 = +0.22pp vs MIT-BIH v2
