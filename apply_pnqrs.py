@@ -59,7 +59,10 @@ def infer_fs(ts: pd.Series) -> int:
 
 
 def load_excel_ecg(path: str, fs_override: Optional[int] = None) -> ECGRecord:
-    df   = pd.read_excel(path)
+    if path.endswith(".csv"):
+        df = pd.read_csv(path)
+    else:
+        df = pd.read_excel(path)
     cols = df.columns.tolist()
     ts_col = next(
         (c for c in cols if str(c).lower() in ("timestamp", "time", "t")),
@@ -206,7 +209,7 @@ def process_file(path: str, model, device, fs_override=None) -> dict:
         }
         print(f"  [CH20]  beats={len(res['r_peaks'])}  HR={res['mean_hr']:.0f}bpm")
 
-    base = path.replace(".xlsx", "")
+    base = path.replace(".xlsx", "").replace(".csv", "")
     if "standard_leads" in result:
         pd.DataFrame({
             "sample_index": result["standard_leads"]["r_peaks"],
@@ -232,7 +235,10 @@ def main():
     model  = load_model(device)
     print(f"模型就绪，设备: {device}\n{'─'*50}")
 
-    files = sorted(glob.glob(os.path.join(args.data_dir, "*.xlsx")))
+    files = sorted(
+        glob.glob(os.path.join(args.data_dir, "*.xlsx")) +
+        glob.glob(os.path.join(args.data_dir, "*.csv"))
+    )
     print(f"找到 {len(files)} 个文件\n")
 
     all_results = []
