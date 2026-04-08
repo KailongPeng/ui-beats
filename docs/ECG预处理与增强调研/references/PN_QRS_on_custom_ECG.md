@@ -9,7 +9,7 @@ related: "[[PN_QRS_解读]]"
 
 # PN-QRS 应用于自采 Excel ECG 数据
 
-> ← [[index|返回索引]] | 实现代码：`PN-QRS/apply_pnqrs.py`
+> ← [[index|返回索引]] | 实现代码：`PN-QRS/apply_pnqrs.py` · `PN-QRS/visualize_rpeaks.py`
 
 ---
 
@@ -52,6 +52,40 @@ python apply_pnqrs.py --data_dir /path/to/xlsx --gpu 1
 | `rpeaks_summary.json` | 所有文件的汇总（beats 数、心率、导联使用率） |
 
 `lead_usage_pct` 表示每条导联被选为"最优导联"的帧比例，可用来判断哪路电极接触不良（使用率长期接近 0%）。
+
+---
+
+## 可视化
+
+检测完成后用 `visualize_rpeaks.py` 画图验证，红点即为检测到的 R-peak：
+
+```bash
+cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
+
+# 显示全部通道，前 30 秒（默认）
+python visualize_rpeaks.py \
+  --csv "data/recording.csv" \
+  --fs  1000
+
+# 只看 CH20，从第 60 秒开始看 20 秒
+python visualize_rpeaks.py \
+  --csv      "data/recording.csv" \
+  --fs       1000 \
+  --channels CH20 \
+  --start    60 \
+  --duration 20
+```
+
+| 参数 | 说明 | 默认 |
+|------|------|------|
+| `--csv` | 原始 ECG CSV 路径 | 必填 |
+| `--fs` | 采样率 Hz | 必填 |
+| `--start` | 起始时间（秒） | 0 |
+| `--duration` | 显示时长（秒） | 30 |
+| `--channels` | 显示的通道，逗号分隔，或 `all` | all |
+| `--out` | 输出图片路径 | CSV 同目录自动命名 |
+
+图片自动保存为 `*_rpeaks_vis_0-30s.png`，右上角标注该段的 beats 数和 bpm。
 
 ---
 
