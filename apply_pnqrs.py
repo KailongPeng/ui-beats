@@ -51,7 +51,9 @@ def infer_fs(ts: pd.Series) -> int:
     if pd.api.types.is_numeric_dtype(ts):
         diffs = np.diff(ts.values[:50].astype(float))
         med   = float(np.median(diffs[diffs > 0]))
-        return round(1000 / med) if med > 1 else round(1 / med)
+        # diff < 0.1  → 秒单位（如 0.001s → 1000Hz）
+        # diff >= 0.1 → 毫秒单位（如 1ms → 1000Hz，2ms → 500Hz，4ms → 250Hz）
+        return round(1 / med) if med < 0.1 else round(1000 / med)
     ts_dt = pd.to_datetime(ts)
     diffs = [(ts_dt.iloc[i+1] - ts_dt.iloc[i]).total_seconds()
              for i in range(min(50, len(ts_dt)-1))]
