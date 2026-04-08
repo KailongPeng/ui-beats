@@ -180,8 +180,8 @@ def plot_overview(signal, windows, fs, uc_thr, out_path):
     ax_ecg.set_ylabel("CH20 (ADC counts)", fontsize=9)
     ax_ecg.set_title(
         f"{os.path.basename(out_path)}  |  "
-        f"绿色=高质量窗口 ({n_good}/{n_total})  红色=低质量  "
-        f"阈值 mean(U_E+U_A) <= {uc_thr}",
+        f"Green=good ({n_good}/{n_total})  Red=low-quality  "
+        f"threshold mean(U_E+U_A) <= {uc_thr}",
         fontsize=8.5, pad=5
     )
     ax_ecg.tick_params(labelsize=8)
@@ -196,7 +196,7 @@ def plot_overview(signal, windows, fs, uc_thr, out_path):
     bar_w  = STEP_SEC * 0.75
     ax_uc.bar(xs, ucs, width=bar_w, color=colors, alpha=0.75, edgecolor="none")
     ax_uc.axhline(uc_thr, color="gray", lw=1.0, linestyle="--",
-                  label=f"阈值 {uc_thr}")
+                  label=f"threshold {uc_thr}")
     ax_uc.set_ylabel("mean(U_E+U_A)", fontsize=8)
     ax_uc.set_xlabel("Time (s)", fontsize=9)
     ax_uc.tick_params(labelsize=8)
@@ -266,12 +266,86 @@ def plot_good_segments(signal, good_windows, fs, out_path, max_cols=3):
         fig.add_subplot(gs[r, c]).set_visible(False)
 
     fig.suptitle(
-        f"高质量片段 (共 {n} 个)  |  mean(U_E+U_A) 低 + 心拍数正常  |  红点=R-peak",
+        f"Good segments (n={n})  |  low mean(U_E+U_A) + normal beat count  |  red dot = R-peak",
         fontsize=9, y=1.01
     )
     plt.savefig(out_path, dpi=130, bbox_inches="tight")
     plt.close()
     print(f"  [片段图] {out_path}")
+
+
+# ──────────────────────────────────────────────
+# 单文件处理（单模式和批量模式共用）
+# ──────────────────────────────────────────────
+
+def process_one_file(csv_path: str, fs: int, model, device,
+                     uc_thr: float, out_dir: str = None):
+    """
+    处理单个 CSV/Excel 文件，输出放在文件同目录下。
+    返回包含每文件统计信息的 dict，供批量汇总使用；
+    若文件无 CH20 列则返回 None。
+    """
+    if csv_path.endswith(".csv"):
+        df = pd.read_csv(csv_path)
+    else:
+        df = pd.read_excel(csv_path)
+
+    upper_col = next((c for c in df.columns if str(c).upper() == "CH20"), None)
+    if upper_col is None:
+        print(f"  [跳过] 未找到 CH20 列：{csv_path}")
+        return None
+
+    signal    = df[upper_col].values.astype(np.float32)
+    base_name = os.path.basename(csv_path).replace(".csv", "").replace(".xlsx", "")
+    file_dir  = os.path.dirname(os.path.abspath(csv_path))
+    seg_dir   = out_dir or os.path.join(file_dir, "quality_segments")
+    duration_s = len(signal) / fs
+
+    print(f"\n>> {csv_path}")
+    print(f"   fs={fs}Hz  duration={duration_s:.1f}s  uc_thr={uc_thr}")
+
+    windows      = assess_quality(signal, fs, model, device, uc_thr)
+    n_good       = sum(w["is_good"] for w in windows)
+    n_total      = len(windows)
+    good_windows = save_segments(signal, windows, fs, seg_dir, base_name)
+
+    # 统计指标
+    good_ucs   = [w["mean_uc"] for w in windows if w["is_good"]]
+    all_ucs    = [w["mean_uc"] for w in windows]
+    good_beats = [w["n_beats"] for w in windows if w["is_good"]]
+    mean_uc_good = float(np.mean(good_ucs))  if good_ucs  else float("nan")
+    mean_uc_all  = float(np.mean(all_ucs))   if all_ucs   else float("nan")
+    mean_beats   = float(np.mean(good_beats)) if good_beats else float("nan")
+    good_ratio   = n_good / max(n_total, 1) * 100
+
+    pd.DataFrame([
+        {k: v for k, v in w.items() if k != "r_peaks_abs"}
+        for w in windows
+    ]).to_csv(os.path.join(file_dir, base_name + "_quality_report.csv"), index=False)
+
+    plot_overview(
+        signal, windows, fs, uc_thr,
+        os.path.join(file_dir, base_name + "_quality_overview.png")
+    )
+    plot_good_segments(
+        signal, good_windows, fs,
+        os.path.join(file_dir, base_name + "_quality_segments.png")
+    )
+
+    print(f"   good={n_good}/{n_total} ({good_ratio:.1f}%)  "
+          f"mean_uc(good)={mean_uc_good:.3f}  NPZ → {seg_dir}")
+
+    return dict(
+        file          = csv_path,
+        duration_s    = round(duration_s, 1),
+        n_windows     = n_total,
+        n_good        = n_good,
+        n_bad         = n_total - n_good,
+        good_ratio_pct= round(good_ratio, 1),
+        mean_uc_good  = round(mean_uc_good, 4) if not np.isnan(mean_uc_good) else None,
+        mean_uc_all   = round(mean_uc_all,  4) if not np.isnan(mean_uc_all)  else None,
+        mean_beats_good = round(mean_beats, 1) if not np.isnan(mean_beats)   else None,
+    )
 
 
 # ──────────────────────────────────────────────
@@ -282,63 +356,146 @@ def main():
     ap = argparse.ArgumentParser(
         description="基于 PN-QRS 不确定性提取 CH20 高质量 10 秒片段"
     )
-    ap.add_argument("--csv",     required=True,              help="原始 ECG CSV/Excel 文件路径")
+
+    # 模式互斥：单文件 vs 批量
+    mode = ap.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--csv",      help="单文件模式：原始 ECG CSV/Excel 文件路径")
+    mode.add_argument("--data_dir", help="批量模式（需同时加 --batch）：递归扫描该目录下所有 CSV/Excel")
+
+    ap.add_argument("--batch",   action="store_true",
+                    help="开启批量模式，递归处理 --data_dir 下所有 CSV/Excel 文件")
     ap.add_argument("--fs",      required=True, type=int,    help="采样率 Hz")
     ap.add_argument("--uc_thr",  default=UC_THR_DEF, type=float,
-                    help=f"不确定性阈值，默认 {UC_THR_DEF}（越低越严格；建议从 1.0 开始调）")
+                    help=f"不确定性阈值，默认 {UC_THR_DEF}（越低越严格）")
     ap.add_argument("--out_dir", default=None,
-                    help="高质量片段 NPZ 保存目录（默认：CSV 同目录下 quality_segments/）")
+                    help="NPZ 保存目录（单文件模式默认：CSV 同目录/quality_segments/；"
+                         "批量模式默认：各 CSV 同目录下各自建 quality_segments/）")
     ap.add_argument("--gpu",     default="0")
     args = ap.parse_args()
+
+    # 参数校验
+    if args.batch and args.data_dir is None:
+        ap.error("--batch 需要同时指定 --data_dir")
+    if not args.batch and args.csv is None:
+        ap.error("单文件模式需要指定 --csv")
 
     device = torch.device(f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu")
     print(f"加载模型... 设备: {device}")
     model = load_model(device)
 
-    # 读取 CH20 信号
-    if args.csv.endswith(".csv"):
-        df = pd.read_csv(args.csv)
-    else:
-        df = pd.read_excel(args.csv)
-    upper_col = next((c for c in df.columns if str(c).upper() == "CH20"), None)
-    if upper_col is None:
-        raise ValueError(f"未在 {args.csv} 中找到 CH20 列，可用列: {df.columns.tolist()}")
-    signal = df[upper_col].values.astype(np.float32)
+    # ── 单文件模式 ──────────────────────────────
+    if not args.batch:
+        stat = process_one_file(
+            args.csv, args.fs, model, device, args.uc_thr, args.out_dir
+        )
+        if stat:
+            print(f"\nDone. good={stat['n_good']}/{stat['n_windows']} "
+                  f"({stat['good_ratio_pct']}%)")
+        return
 
-    base_name = os.path.basename(args.csv).replace(".csv", "").replace(".xlsx", "")
-    csv_dir   = os.path.dirname(os.path.abspath(args.csv))
-    out_dir   = args.out_dir or os.path.join(csv_dir, "quality_segments")
+    # ── 批量模式 ────────────────────────────────
+    import glob as _glob
+    patterns = ["**/*.csv", "**/*.xlsx"]
+    all_files = []
+    for pat in patterns:
+        all_files += _glob.glob(os.path.join(args.data_dir, pat), recursive=True)
 
-    print(f"\n文件  : {args.csv}")
-    print(f"采样率: {args.fs} Hz  时长: {len(signal)/args.fs:.1f}s  阈值: {args.uc_thr}")
-    print(f"窗口  : {WIN_SEC}s  步长: {STEP_SEC}s  心拍范围: {BEAT_MIN}-{BEAT_MAX}/10s\n")
+    # 过滤掉脚本自身产生的输出文件
+    skip_suffixes = (
+        "_quality_report.csv", "_CH1-8_rpeaks.csv", "_CH20_rpeaks.csv",
+        "_quality_overview.png", "_quality_segments.png",
+    )
+    all_files = sorted(
+        f for f in all_files
+        if not any(f.endswith(s) for s in skip_suffixes)
+    )
 
-    # 逐窗口质量评估
-    windows = assess_quality(signal, args.fs, model, device, args.uc_thr)
+    if not all_files:
+        print(f"No CSV/Excel files found under {args.data_dir}")
+        return
 
-    n_good  = sum(w["is_good"] for w in windows)
-    n_total = len(windows)
-    print(f"评估完成：{n_total} 个窗口  高质量: {n_good}  低质量: {n_total - n_good}")
+    print(f"\nFound {len(all_files)} files (recursive scan: {args.data_dir})")
+    print(f"uc_thr={args.uc_thr}  fs={args.fs}Hz\n{'─'*60}")
 
-    # 保存 NPZ
-    good_windows = save_segments(signal, windows, args.fs, out_dir, base_name)
-    print(f"高质量片段已保存至: {out_dir}  ({len(good_windows)} 个 .npz)")
+    data_dir_abs = os.path.abspath(args.data_dir)
+    stats = []
+    for csv_path in all_files:
+        stat = process_one_file(
+            csv_path, args.fs, model, device, args.uc_thr, args.out_dir
+        )
+        if stat:
+            # 从相对路径提取行为标签（data_dir 下的第一级子目录名）
+            rel = os.path.relpath(csv_path, data_dir_abs)
+            parts = Path(rel).parts
+            stat["activity"] = parts[0] if len(parts) > 1 else "(root)"
+            stat["rel_path"] = rel
+            stats.append(stat)
 
-    # 保存质量报告 CSV
-    report_path = os.path.join(csv_dir, base_name + "_quality_report.csv")
-    pd.DataFrame([
-        {k: v for k, v in w.items() if k != "r_peaks_abs"}
-        for w in windows
-    ]).to_csv(report_path, index=False)
-    print(f"质量报告: {report_path}")
+    if not stats:
+        print("No files processed.")
+        return
 
-    # 可视化
-    overview_path = os.path.join(csv_dir, base_name + "_quality_overview.png")
-    segments_path = os.path.join(csv_dir, base_name + "_quality_segments.png")
-    plot_overview(signal, windows, args.fs, args.uc_thr, overview_path)
-    plot_good_segments(signal, good_windows, args.fs, segments_path)
+    # ── 批量汇总报告 CSV ────────────────────────
+    summary_path = os.path.join(args.data_dir, "batch_quality_summary.csv")
+    col_order = ["activity", "rel_path", "duration_s", "n_windows",
+                 "n_good", "n_bad", "good_ratio_pct",
+                 "mean_uc_good", "mean_uc_all", "mean_beats_good"]
+    pd.DataFrame(stats)[col_order].to_csv(summary_path, index=False)
 
-    print(f"\n完成。高质量率: {n_good}/{n_total} = {n_good/max(n_total,1)*100:.1f}%")
+    # ── 按行为分组汇总打印 ──────────────────────
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for s in stats:
+        groups[s["activity"]].append(s)
+
+    def _group_row(label, rows):
+        gw = sum(r["n_windows"] for r in rows)
+        gg = sum(r["n_good"]    for r in rows)
+        gd = sum(r["duration_s"] for r in rows)
+        gr = gg / max(gw, 1) * 100
+        uc_vals = [r["mean_uc_good"] for r in rows if r["mean_uc_good"] is not None]
+        uc_str  = f"{np.mean(uc_vals):.3f}" if uc_vals else "  n/a"
+        return label, gd, gw, gg, gr, uc_str
+
+    file_w = max(len(s["rel_path"]) for s in stats)
+    ACT_W  = max(max(len(s["activity"]) for s in stats), 8)
+    HDR = (f"  {'file':<{file_w}}  {'dur(s)':>7}  {'windows':>7}  "
+           f"{'good':>5}  {'ratio%':>7}  {'uc_good':>8}  {'beats':>6}")
+    SEP = "─" * (len(HDR) + ACT_W + 2)
+
+    print(f"\n{SEP}")
+    print(f"{'activity':<{ACT_W}}{HDR}")
+    print(SEP)
+
+    act_totals = []
+    for activity in sorted(groups):
+        rows = groups[activity]
+        # 行为小计行
+        lbl, gd, gw, gg, gr, uc_str = _group_row(activity, rows)
+        print(f"\033[1m{lbl:<{ACT_W}}"
+              f"  {'':>{file_w}}  {gd:>7.1f}  {gw:>7}  "
+              f"{gg:>5}  {gr:>6.1f}%  {uc_str:>8}\033[0m")
+        # 每文件明细行（缩进）
+        for s in rows:
+            uc_g  = f"{s['mean_uc_good']:.3f}"   if s["mean_uc_good"]    is not None else "   n/a"
+            beats = f"{s['mean_beats_good']:.1f}" if s["mean_beats_good"] is not None else "  n/a"
+            fname = os.path.basename(s["file"])
+            indent_file = f"  └ {fname}"
+            print(f"{'':>{ACT_W}}"
+                  f"  {indent_file:<{file_w}}  {s['duration_s']:>7.1f}  {s['n_windows']:>7}  "
+                  f"{s['n_good']:>5}  {s['good_ratio_pct']:>6.1f}%  {uc_g:>8}  {beats:>6}")
+        act_totals.append((activity, gd, gw, gg, gr))
+
+    # 总计行
+    total_windows = sum(s["n_windows"]  for s in stats)
+    total_good    = sum(s["n_good"]     for s in stats)
+    total_dur_s   = sum(s["duration_s"] for s in stats)
+    overall_ratio = total_good / max(total_windows, 1) * 100
+    print(SEP)
+    print(f"\033[1m{'TOTAL':<{ACT_W}}"
+          f"  {'':>{file_w}}  {total_dur_s:>7.1f}  {total_windows:>7}  "
+          f"{total_good:>5}  {overall_ratio:>6.1f}%\033[0m")
+    print(f"\nBatch summary saved → {summary_path}")
 
 
 if __name__ == "__main__":
