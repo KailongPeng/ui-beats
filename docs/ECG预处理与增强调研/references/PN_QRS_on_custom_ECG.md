@@ -9,7 +9,7 @@ related: "[[PN_QRS_解读]]"
 
 # PN-QRS 应用于自采 Excel ECG 数据
 
-> ← [[index|返回索引]] | 实现代码：`PN-QRS/apply_pnqrs.py` · `PN-QRS/visualize_rpeaks.py` · `PN-QRS/evaluate_upper_arm.py`
+> ← [[index|返回索引]] | 实现代码：`PN-QRS/apply_pnqrs.py` · `PN-QRS/visualize_rpeaks.py` · `PN-QRS/evaluate_upper_arm.py` · `PN-QRS/extract_quality_segments.py`
 
 ---
 
@@ -98,6 +98,33 @@ python visualize_rpeaks.py \
 **检测数量极少（如 46 个可见 spike 只检出 4 个）**：信号单位是 ADC 计数（幅度 >>10）时，`preprocess_ecg` 内部的 `pp()` 函数会把整段信号抹平成常数，导致模型看不到任何波形。`apply_pnqrs.py` 已在进入 `preprocess_ecg` 前自动做 z-score 预处理规避此问题（`_run_window` 中 `std > 1` 时触发）。
 
 **某导联 lead_usage_pct 始终为 0%**：U_E 机制已自动排除该导联，结果不受影响，但说明该导联可能脱落或极性错误。
+
+---
+
+## 基于不确定性提取高质量片段（仅需 CH20）
+
+不需要 12 导联，只用上臂导联信号即可判断每个 10 秒窗口的信号质量，并提取高质量片段：
+
+```bash
+cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
+
+# 基本用法（阈值默认 1.0）
+python extract_quality_segments.py --csv /path/to/data.csv --fs 1000
+
+# 调严阈值（只保留最干净的片段）
+python extract_quality_segments.py --csv /path/to/data.csv --fs 1000 --uc_thr 0.5
+```
+
+**输出：**
+
+| 文件 | 内容 |
+|------|------|
+| `*_quality_overview.png` | 全段信号，绿色=高质量窗口，红色=低质量，下方柱状图显示每窗口的 mean(U_E+U_A) |
+| `*_quality_segments.png` | 所有高质量片段网格图，每格含 R-peak 红点 + 心率 + 不确定性值 |
+| `*_quality_report.csv` | 每窗口的详细数值：`start_s, end_s, n_beats, mean_uc, is_good` |
+| `quality_segments/*.npz` | 每个高质量片段的 NumPy 存档，可直接加载送进 ECGFounder |
+
+**原理**：PN-QRS 在推理每个窗口时，内部同时计算 U_E（认知不确定性）和 U_A（偶然不确定性）。`mean(U_E + U_A)` 低 → 模型自信 + 信号干净；高 → 信号嘈杂或电极脱落。详见 [[PN_QRS_to_ECGFounder_pipeline#两种不确定性的含义]]。
 
 ---
 
