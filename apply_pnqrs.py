@@ -94,6 +94,13 @@ def load_model(device) -> QRSModel:
 
 
 def _run_window(model, window_1d: np.ndarray, fs: int, device):
+    # preprocess_ecg 内部的 pp() 函数设计用于 mV 单位信号（阈值 10mV）。
+    # 若信号为 ADC 计数（幅度 >>10），pp() 会把整段信号抹平成常数导致检测失败。
+    # 预先 z-score 使幅度落在 ±3 左右，pp() 不再触发，后续 preprocess_ecg
+    # 内部会再做一次 z-score，两次叠加不影响结果。
+    std = window_1d.std()
+    if std > 1:   # std <= 1 说明已是 mV 量级，不需要预处理
+        window_1d = (window_1d - window_1d.mean()) / std
     proc = preprocess_ecg(window_1d, fs=fs)
     if proc.ndim == 1:
         proc = proc[np.newaxis, :]

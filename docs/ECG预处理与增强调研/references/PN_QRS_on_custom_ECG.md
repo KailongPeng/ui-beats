@@ -95,6 +95,8 @@ python visualize_rpeaks.py \
 
 **采样率推断错误**：加 `--fs 250`（或设备实际采样率）手动指定。
 
+**检测数量极少（如 46 个可见 spike 只检出 4 个）**：信号单位是 ADC 计数（幅度 >>10）时，`preprocess_ecg` 内部的 `pp()` 函数会把整段信号抹平成常数，导致模型看不到任何波形。`apply_pnqrs.py` 已在进入 `preprocess_ecg` 前自动做 z-score 预处理规避此问题（`_run_window` 中 `std > 1` 时触发）。
+
 **某导联 lead_usage_pct 始终为 0%**：U_E 机制已自动排除该导联，结果不受影响，但说明该导联可能脱落或极性错误。
 
 ---
