@@ -9,7 +9,7 @@ related: "[[PN_QRS_解读]]"
 
 # PN-QRS 应用于自采 Excel ECG 数据
 
-> ← [[index|返回索引]] | 实现代码：`PN-QRS/apply_pnqrs.py` · `PN-QRS/visualize_rpeaks.py`
+> ← [[index|返回索引]] | 实现代码：`PN-QRS/apply_pnqrs.py` · `PN-QRS/visualize_rpeaks.py` · `PN-QRS/evaluate_upper_arm.py`
 
 ---
 
@@ -98,6 +98,39 @@ python visualize_rpeaks.py \
 **检测数量极少（如 46 个可见 spike 只检出 4 个）**：信号单位是 ADC 计数（幅度 >>10）时，`preprocess_ecg` 内部的 `pp()` 函数会把整段信号抹平成常数，导致模型看不到任何波形。`apply_pnqrs.py` 已在进入 `preprocess_ecg` 前自动做 z-score 预处理规避此问题（`_run_window` 中 `std > 1` 时触发）。
 
 **某导联 lead_usage_pct 始终为 0%**：U_E 机制已自动排除该导联，结果不受影响，但说明该导联可能脱落或极性错误。
+
+---
+
+## 评估上臂导联质量（CH20 vs CH1-8）
+
+以 12 导联融合结果为伪标准答案，量化上臂导联 CH20 的检测质量：
+
+```bash
+cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
+
+# 先运行 apply_pnqrs.py 生成 *_rpeaks.csv，再运行评估
+python evaluate_upper_arm.py --data_dir /path/to/data --fs 1000
+```
+
+输出示例：
+
+```
+recording
+  ref(12导联)=450  pred(CH20)=448
+  TP=441  FP=7  FN=9
+  Se=97.78%  P+=98.44%  F1=98.11%
+
+汇总（3 个文件）
+  Se=97.80%  P+=98.20%  F1=98.00%
+```
+
+| 指标 | 含义 |
+|------|------|
+| Se（敏感度） | CH20 检出了多少 12 导联检到的心拍（低 → 漏检多） |
+| P+（精确率） | CH20 的检出中有多少是真实心拍（低 → 误报多） |
+| F1 | 综合指标 |
+
+> **注意**：12 导联结果本身不是绝对 ground truth，只是比单导联更可靠的参考。
 
 ---
 
