@@ -111,10 +111,23 @@ python visualize_rpeaks.py \
 
 | 条件 | 判断 | 说明 |
 |------|------|------|
-| `mean(U_E + U_A) <= uc_thr` | 不确定性足够低 | 模型对该段信号的预测自信；电极脱落时 mean_uc~10，干净信号~0.1–0.3 |
+| `mean_uc <= uc_thr` | 噪声帧占比足够低 | 见下方原理说明；电极脱落时 mean_uc~10，干净信号~0.1–0.5 |
 | `5 <= n_beats <= 25` | 心拍数正常 | 对应 30–150 bpm；排除完全脱落（0拍）或误检爆炸 |
 
-> **注意**：默认阈值 `uc_thr=1.0` 是为临床 ECG 设计的。**可穿戴/上臂导联**信噪比更低，mean_uc 普遍在 1–3 之间，建议先用 `--uc_thr auto` 自动决定，或从 `--uc_thr 2.0` 开始调试。
+**`mean_uc` 的实际计算（`uncertain_est()` 内部）：**
+
+```python
+au  = en_est(logits)     # 逐帧预测熵（偶然不确定性，连续值）[T]
+eu  = mi_est(logits)     # 逐帧 KL 散度（认知不确定性，连续值）[T]
+eu[eu > 0.12] = 10       # 关键：把噪声帧二值化 → 10（硬判决）
+mean_uc = mean(eu + au)  # 对所有帧取均值
+```
+
+`eu > 0.12` 的帧被直接打成 10，所以 `mean_uc` 实质上是**噪声帧占比的加权计数**，而不是论文里连续定义的 U_E + U_A 均值。只要窗口里有少数几帧被判定为噪声，mean_uc 就会被显著拉高。
+
+> **注意**：论文里 U_E 和 U_A 是分开使用的（U_E 判断导联有效性，U_A 标记可疑心拍），`uncertain_est()` 的合并写法是代码层面的工程适应，并非论文定义。
+
+> **阈值建议**：默认 `uc_thr=1.0` 是为临床 ECG 设计的。**可穿戴/上臂导联**信噪比更低，mean_uc 普遍在 1–3 之间，建议先用 `--uc_thr auto` 自动决定，或从 `--uc_thr 2.0` 开始调试。
 
 ### 单文件模式
 
@@ -214,7 +227,7 @@ TOTAL                           1742.0      218    151   69.3%
 | `batch_quality_summary.csv` | `data_dir` 根目录 | 所有文件汇总：`activity, rel_path, duration_s, n_windows, n_good, good_ratio_pct, mean_uc_good, mean_uc_all, mean_beats_good` |
 | `batch_uc_distribution.png` | `data_dir` 根目录 | 批量 auto 模式专有：所有文件的 mean_uc pooled 分布 + Otsu 阈值线 |
 
-**原理**：PN-QRS 推理时同时计算 U_E（认知不确定性）和 U_A（偶然不确定性）。`mean(U_E + U_A)` 低 → 信号干净；高 → 噪声或电极脱落。详见 [[PN_QRS_to_ECGFounder_pipeline#两种不确定性的含义]]。
+**原理**：`uncertain_est()` 逐帧计算认知不确定性（eu）和偶然不确定性（au），将 `eu > 0.12` 的帧二值化为 10，然后对 `eu + au` 取窗口均值得到 `mean_uc`。该值本质上反映了窗口内**噪声帧的占比**：干净信号 ~0.1–0.5，电极脱落 ~10。详见 [[PN_QRS_to_ECGFounder_pipeline#质量分数的含义]]。
 
 ---
 

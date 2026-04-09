@@ -53,7 +53,7 @@ COLOR_BAD     = "#e74c3c"
 # ──────────────────────────────────────────────
 
 def load_model(device):
-    ckpt  = torch.load(str(CKPT_PATH), map_location="cpu")
+    ckpt  = torch.load(str(CKPT_PATH), map_location="cpu", weights_only=False)
     model = QRSModel(encoder4qrs(), decoder4qrs(), phi_qrs()).to(device)
     model.load_state_dict(ckpt["model_state"])
     return model.eval()
@@ -276,19 +276,33 @@ def plot_overview(signal, windows, fs, uc_thr, out_path):
     ax_ecg.spines["right"].set_visible(False)
 
     # ── 不确定性图 ────────────────────────────────
-    xs  = np.array([(w["start_s"] + w["end_s"]) / 2 for w in windows])
     ucs = np.array([min(w["mean_uc"], uc_thr * 3) for w in windows])
 
     if dense:
-        # 折线 + 填色（密集窗口时比 bar 清晰）
-        good_mask = np.array([w["is_good"] for w in windows])
-        ax_uc.fill_between(xs, ucs, 0, where=good_mask,
+        # 把每个窗口的 mean_uc 铺回到它覆盖的每个样本（多窗口重叠时取均值），
+        # 与上方 ECG panel 的时间轴完全对齐。
+        sig_len     = len(signal)
+        uc_map      = np.zeros(sig_len, dtype=np.float32)
+        cnt_map     = np.zeros(sig_len, dtype=np.float32)
+        good_map    = np.zeros(sig_len, dtype=bool)
+        for w in windows:
+            s, e = w["start_samp"], w["end_samp"]
+            uc_map[s:e]  += w["mean_uc"]
+            cnt_map[s:e] += 1
+            if w["is_good"]:
+                good_map[s:e] = True
+        valid       = cnt_map > 0
+        uc_map[valid] /= cnt_map[valid]
+        uc_map      = np.clip(uc_map, 0, uc_thr * 3)
+
+        ax_uc.fill_between(t, uc_map, 0, where=valid & good_map,
                            color=COLOR_GOOD, alpha=0.55, lw=0, label="good")
-        ax_uc.fill_between(xs, ucs, 0, where=~good_mask,
+        ax_uc.fill_between(t, uc_map, 0, where=valid & ~good_map,
                            color=COLOR_BAD,  alpha=0.45, lw=0, label="low-quality")
-        ax_uc.plot(xs, ucs, lw=0.6, color="steelblue", alpha=0.7)
+        ax_uc.plot(t[valid], uc_map[valid], lw=0.6, color="steelblue", alpha=0.7)
     else:
-        # 柱状图（稀疏窗口时更直观）
+        # 柱状图（稀疏窗口时更直观）：用窗口中心，bar 居中符合习惯
+        xs     = np.array([(w["start_s"] + w["end_s"]) / 2 for w in windows])
         bar_w  = step_sec * 0.75
         colors = [COLOR_GOOD if w["is_good"] else COLOR_BAD for w in windows]
         ax_uc.bar(xs, ucs, width=bar_w, color=colors, alpha=0.75, edgecolor="none")
