@@ -373,6 +373,69 @@ def plot_good_segments(signal, good_windows, fs, out_path, max_cols=3):
 
 
 # ──────────────────────────────────────────────
+# 可视化 3：mean_uc 分布图（判断 Otsu 阈值是否可信）
+# ──────────────────────────────────────────────
+
+def plot_uc_distribution(uc_values: list, uc_thr: float, out_path: str,
+                         title: str = ""):
+    """
+    绘制 mean_uc 直方图 + Otsu 阈值线。
+    uc range 跨度大 → 双峰明显 → 阈值可信；跨度小 → 单峰 → 提示手动设置。
+    """
+    ucs = np.array(uc_values, dtype=float)
+    n   = len(ucs)
+    if n == 0:
+        return
+
+    uc_min, uc_max = ucs.min(), ucs.max()
+    uc_range = uc_max - uc_min
+
+    # 判断可信度
+    bimodal    = uc_range > 1.0      # 跨度 > 1 认为双峰明显
+    trust_note = ("Bimodal distribution — threshold reliable"
+                  if bimodal else
+                  "Unimodal distribution — threshold may be unreliable, consider setting --uc_thr manually")
+
+    # 直方图 bin 数量
+    n_bins = min(max(int(n / 2), 20), 80)
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+
+    # 画两段直方图：阈值左边（绿）和右边（红）
+    bins = np.linspace(min(uc_min, 0), min(uc_max, uc_thr * 4), n_bins + 1)
+    good_mask = ucs <= uc_thr
+    ax.hist(ucs[good_mask],  bins=bins, color=COLOR_GOOD, alpha=0.7,
+            label=f"good  (n={good_mask.sum()})", edgecolor="none")
+    ax.hist(ucs[~good_mask], bins=bins, color=COLOR_BAD,  alpha=0.7,
+            label=f"low-quality  (n={(~good_mask).sum()})", edgecolor="none")
+
+    # Otsu 阈值线
+    ax.axvline(uc_thr, color="black", lw=1.5, linestyle="--",
+               label=f"threshold = {uc_thr:.3f}")
+
+    # 可信度注释
+    color_note = COLOR_GOOD if bimodal else COLOR_BAD
+    ax.text(0.98, 0.95, trust_note,
+            transform=ax.transAxes, ha="right", va="top",
+            fontsize=8, color=color_note,
+            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=color_note, alpha=0.8))
+
+    ax.set_xlabel("mean(U_E + U_A) per window", fontsize=9)
+    ax.set_ylabel("Window count", fontsize=9)
+    ax.set_title(
+        f"{title}  |  n={n} windows  |  uc range: {uc_min:.3f} – {uc_max:.3f}",
+        fontsize=9
+    )
+    ax.legend(fontsize=8)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=130, bbox_inches="tight")
+    plt.close()
+    print(f"  [分布图] {out_path}  {'✓ bimodal' if bimodal else '⚠ unimodal'}")
+
+
+# ──────────────────────────────────────────────
 # 单文件处理（单模式和批量模式共用）
 # ──────────────────────────────────────────────
 
@@ -440,6 +503,11 @@ def process_one_file(csv_path: str, fs: int, model, device,
     plot_good_segments(
         signal, good_windows, fs,
         os.path.join(file_dir, base_name + "_quality_segments.png")
+    )
+    plot_uc_distribution(
+        all_ucs, uc_thr,
+        os.path.join(file_dir, base_name + "_uc_distribution.png"),
+        title=base_name
     )
 
     print(f"   good={n_good}/{n_total} ({good_ratio:.1f}%)  "
@@ -582,6 +650,11 @@ def main():
         uc_thr = otsu_threshold(all_ucs)
         print(f"\nOtsu threshold (pooled, {len(all_ucs)} windows) = {uc_thr:.4f}  "
               f"(uc range: {min(all_ucs):.3f} – {max(all_ucs):.3f})")
+        plot_uc_distribution(
+            all_ucs, uc_thr,
+            os.path.join(args.data_dir, "batch_uc_distribution.png"),
+            title=f"Pooled distribution — {len(all_file_data)} files"
+        )
         print(f"pass 2 — applying threshold and generating outputs...\n{'─'*60}")
 
         for csv_path, (_, windows) in all_file_data.items():

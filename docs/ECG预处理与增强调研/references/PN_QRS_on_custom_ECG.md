@@ -206,11 +206,13 @@ TOTAL                           1742.0      218    151   69.3%
 
 | 文件 | 位置 | 内容 |
 |------|------|------|
-| `*_quality_overview.png` | 各 CSV 同目录 | 全段信号 + 绿/红背景 + 不确定性柱状图 |
+| `*_quality_overview.png` | 各 CSV 同目录 | 全段信号 + 绿/红背景 + 不确定性折线/柱状图 |
 | `*_quality_segments.png` | 各 CSV 同目录 | 高质量片段网格，含 R-peak 红点 + 心率 + uc 值 |
+| `*_uc_distribution.png` | 各 CSV 同目录 | mean_uc 直方图 + 阈值线；绿字"Bimodal"= 阈值可信，红字"Unimodal"= 建议手动设置 |
 | `*_quality_report.csv` | 各 CSV 同目录 | 每窗口明细：`start_s, end_s, n_beats, mean_uc, is_good` |
 | `quality_segments/*.npz` | 各 CSV 同目录 | 每个高质量片段的 NumPy 存档，可直接送进 ECGFounder |
 | `batch_quality_summary.csv` | `data_dir` 根目录 | 所有文件汇总：`activity, rel_path, duration_s, n_windows, n_good, good_ratio_pct, mean_uc_good, mean_uc_all, mean_beats_good` |
+| `batch_uc_distribution.png` | `data_dir` 根目录 | 批量 auto 模式专有：所有文件的 mean_uc pooled 分布 + Otsu 阈值线 |
 
 **原理**：PN-QRS 推理时同时计算 U_E（认知不确定性）和 U_A（偶然不确定性）。`mean(U_E + U_A)` 低 → 信号干净；高 → 噪声或电极脱落。详见 [[PN_QRS_to_ECGFounder_pipeline#两种不确定性的含义]]。
 
