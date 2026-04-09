@@ -105,19 +105,36 @@ python visualize_rpeaks.py \
 
 不需要 12 导联，只用上臂导联信号即可判断每个 10 秒窗口的信号质量，并提取高质量片段。
 
+### 高质量片段的判定标准
+
+每个 10 秒窗口必须**同时满足两个条件**才被标记为高质量：
+
+| 条件 | 判断 | 说明 |
+|------|------|------|
+| `mean(U_E + U_A) <= uc_thr` | 不确定性足够低 | 模型对该段信号的预测自信；电极脱落时 mean_uc~10，干净信号~0.1–0.3 |
+| `5 <= n_beats <= 25` | 心拍数正常 | 对应 30–150 bpm；排除完全脱落（0拍）或误检爆炸 |
+
+> **注意**：默认阈值 `uc_thr=1.0` 是为临床 ECG 设计的。**可穿戴/上臂导联**信噪比更低，mean_uc 普遍在 1–3 之间，建议先用 `--uc_thr auto` 自动决定，或从 `--uc_thr 2.0` 开始调试。
+
 ### 单文件模式
 
 ```bash
 cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
 
-# 基本用法（不确定性阈值默认 1.0）
+# 自动阈值（推荐，Otsu 方法自动分割好/坏窗口）
+python extract_quality_segments.py --csv /path/to/data.csv --fs 1000 --uc_thr auto
+
+# 基本用法（不确定性阈值默认 1.0，临床 ECG 适用）
 python extract_quality_segments.py --csv /path/to/data.csv --fs 1000
 
 # 调严阈值：只保留最干净的片段（阈值越低越严格）
 python extract_quality_segments.py --csv /path/to/data.csv --fs 1000 --uc_thr 0.5
 
-# 调宽阈值：尽量多保留片段
+# 调宽阈值：尽量多保留片段（可穿戴数据推荐起点）
 python extract_quality_segments.py --csv /path/to/data.csv --fs 1000 --uc_thr 2.0
+
+# 嘈杂数据：缩小滑动步长（默认 8s → 1s），密集扫描发现夹在噪声里的干净片段
+python extract_quality_segments.py --csv /path/to/data.csv --fs 1000 --uc_thr auto --step 1
 ```
 
 ### 批量模式（`--batch`）
@@ -137,8 +154,14 @@ cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
 # 递归扫描，按行为子目录自动分组
 python extract_quality_segments.py --batch --data_dir /path/to/data_dir --fs 1000
 
-# 批量 + 调阈值
-python extract_quality_segments.py --batch --data_dir /path/to/data_dir --fs 1000 --uc_thr 0.5
+# 批量 + 自动阈值（两遍：先全量推理，汇总 Otsu 阈值，再统一过滤）
+python extract_quality_segments.py --batch --data_dir /path/to/data_dir --fs 1000 --uc_thr auto
+
+# 批量 + 手动阈值
+python extract_quality_segments.py --batch --data_dir /path/to/data_dir --fs 1000 --uc_thr 2.0
+
+# 嘈杂数据批量：密集滑动窗口（step=2s）+ 自动阈值
+python extract_quality_segments.py --batch --data_dir /path/to/data_dir --fs 1000 --uc_thr auto --step 2
 ```
 
 **终端输出示例（按行为分组，小计加粗）：**
@@ -173,7 +196,9 @@ TOTAL                           1742.0      218    151   69.3%
 | `--data_dir` | 批量模式：根目录路径 | 必填（批量）|
 | `--batch` | 开启批量模式 flag | 关闭 |
 | `--fs` | 采样率 Hz | 必填 |
-| `--uc_thr` | 不确定性阈值，高于此值丢弃 | `1.0` |
+| `--uc_thr` | 不确定性阈值，高于此值丢弃；填 `auto` 自动用 Otsu 方法决定 | `1.0` |
+| `--step` | 滑动窗口步长（秒）；默认 8s（2s overlap）；嘈杂数据设 1–2s 可密集扫描 | `8` |
+| `--infer_batch` | 每次 GPU forward 的窗口数，越大越快 | `16` |
 | `--out_dir` | NPZ 保存目录（不指定则各自放在 CSV 旁） | 自动 |
 | `--gpu` | 使用的 GPU 编号 | `0` |
 

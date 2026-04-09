@@ -40,7 +40,7 @@ from utils.qrs_post_process import correct, uncertain_est
 
 FS_MODEL      = 50
 WIN_SEC       = 10
-STEP_SEC      = 8          # 滑动步长 (WIN_SEC - OVERLAP_SEC，2 秒 overlap)
+STEP_SEC_DEF  = 8          # 默认滑动步长（2 秒 overlap）；嘈杂数据可用 --step 1~2
 UC_THR_DEF    = 1.0        # mean(U_E+U_A) 阈值，高于此值视为低质量
 BEAT_MIN      = 5          # 10s 内最少心拍 (~30 bpm)
 BEAT_MAX      = 25         # 10s 内最多心拍 (~150 bpm)
@@ -60,14 +60,11 @@ def load_model(device):
 
 
 # ──────────────────────────────────────────────
-# 单窗口推理（返回 R-peak + 不确定性）
+# 窗口预处理（CPU，返回 numpy (1, T_50hz)）
 # ──────────────────────────────────────────────
 
-def infer_window(model, window_1d: np.ndarray, fs: int, device):
-    """
-    返回 (r_peaks_原始采样率, mean_uc, uc_per_frame)
-    uc_per_frame: shape [T_50hz]，逐帧不确定性 (U_E + U_A)
-    """
+def _preprocess_window(window_1d: np.ndarray, fs: int) -> np.ndarray:
+    """z-score + preprocess_ecg，返回 (1, T_50hz) float32。"""
     std = window_1d.std()
     if std > 1:
         window_1d = (window_1d - window_1d.mean()) / std
@@ -76,59 +73,124 @@ def infer_window(model, window_1d: np.ndarray, fs: int, device):
         proc = proc[np.newaxis, :]
     elif proc.shape[0] > proc.shape[1]:
         proc = proc.T
-    sig_t = torch.from_numpy(proc).unsqueeze(0).to(device)
-    with torch.no_grad():
-        logits = model(sig_t, return_projection=True)
-        logits = logits.squeeze(-1).squeeze(0).cpu().numpy()
-    uc     = uncertain_est(logits)               # [T_50hz]
-    r_50hz = correct(logits[0], uc)
-    r_orig = np.round(np.array(r_50hz) * (fs / FS_MODEL)).astype(int)
-    return r_orig, float(np.mean(uc)), uc
+    return proc.astype(np.float32)   # (1, T_50hz)
 
 
 # ──────────────────────────────────────────────
-# 质量评估主函数
+# 自动阈值：Otsu's method（最大化组间方差）
 # ──────────────────────────────────────────────
 
-def assess_quality(signal: np.ndarray, fs: int, model, device, uc_thr: float):
+def otsu_threshold(values: list) -> float:
     """
-    滑动窗口对整段信号评估质量。
-    返回 windows 列表，每项包含：
-      start_samp, end_samp, start_s, end_s,
-      n_beats, mean_uc, is_good, r_peaks_abs
+    对 mean_uc 值列表做 1D Otsu 二值化，返回最优分割阈值。
+    把"好窗口"（低 uc）和"坏窗口"（高 uc）尽可能分开。
     """
-    ws      = int(WIN_SEC  * fs)
-    ss      = int(STEP_SEC * fs)
+    arr = np.sort(np.array(values, dtype=float))
+    n   = len(arr)
+    if n < 2:
+        return arr[0]
+
+    # 累积和用于 O(n) 计算
+    cumsum  = np.cumsum(arr)
+    cumsum2 = np.cumsum(arr ** 2)
+
+    best_thresh    = arr[0]
+    best_var_inter = -1.0
+
+    for i in range(1, n):
+        w1 = i / n
+        w2 = 1.0 - w1
+        if w1 == 0 or w2 == 0:
+            continue
+        mu1 = cumsum[i - 1] / i
+        mu2 = (cumsum[-1] - cumsum[i - 1]) / (n - i)
+        var_inter = w1 * w2 * (mu1 - mu2) ** 2
+        if var_inter > best_var_inter:
+            best_var_inter = var_inter
+            best_thresh    = float((arr[i - 1] + arr[i]) / 2)
+
+    return best_thresh
+
+
+# ──────────────────────────────────────────────
+# 推理（不含阈值判断）+ 阈值应用（分离）
+# ──────────────────────────────────────────────
+
+def run_inference(signal: np.ndarray, fs: int, model, device,
+                  infer_batch: int = 16, step_sec: float = STEP_SEC_DEF) -> list:
+    """
+    滑动窗口批量推理，返回每个窗口的 mean_uc 和 n_beats。
+    infer_batch 个窗口一起做 GPU forward，比逐个推快 5-10x。
+    step_sec 越小，overlap 越大，发现有效窗口的机会越多（嘈杂数据推荐 1~2s）。
+    is_good 暂不填（由 apply_threshold 填入）。
+    """
+    ws      = int(WIN_SEC   * fs)
+    ss      = int(step_sec  * fs)
     sig_len = len(signal)
-    windows = []
-    pos     = 0
 
+    # ── 阶段 1：切片 + CPU 预处理 ─────────────────
+    meta_list   = []   # (start_samp, end_samp)
+    tensor_list = []   # list of (1, T_50hz) float32
+
+    pos = 0
     while pos < sig_len:
         actual_end = min(pos + ws, sig_len)
         w = signal[pos: pos + ws]
-        w = np.pad(w, (0, max(0, ws - len(w))))   # 末尾不足则补零
+        w = np.pad(w, (0, max(0, ws - len(w))))
+        tensor_list.append(_preprocess_window(w, fs))
+        meta_list.append((pos, actual_end))
+        pos += ss
 
-        r_rel, mean_uc, _ = infer_window(model, w, fs, device)
-        # 只保留实际信号范围内的 R-peak（去掉 padding 区）
-        r_rel   = r_rel[r_rel < (actual_end - pos)]
-        n_beats = len(r_rel)
-        r_abs   = r_rel + pos
+    if not tensor_list:
+        return []
 
-        is_good = (mean_uc <= uc_thr) and (BEAT_MIN <= n_beats <= BEAT_MAX)
+    # ── 阶段 2：分批 GPU forward ──────────────────
+    all_logits = []   # list of (n_classes, T_50hz) numpy
+    for i in range(0, len(tensor_list), infer_batch):
+        batch_np = np.stack(tensor_list[i: i + infer_batch], axis=0)  # (B, 1, T_50hz)
+        batch_t  = torch.from_numpy(batch_np).to(device)
+        with torch.no_grad():
+            out = model(batch_t, return_projection=True)   # (B, n_classes, T_50hz[, 1])
+            out = out.squeeze(-1).cpu().numpy()            # (B, n_classes, T_50hz)
+        for j in range(out.shape[0]):
+            all_logits.append(out[j])                      # (n_classes, T_50hz)
+
+    # ── 阶段 3：CPU 后处理（uncertain_est + correct）─
+    windows = []
+    for (pos, actual_end), logits_i in zip(meta_list, all_logits):
+        uc     = uncertain_est(logits_i)
+        r_50hz = correct(logits_i[0], uc)
+        r_orig = np.round(np.array(r_50hz) * (fs / FS_MODEL)).astype(int)
+        r_rel  = r_orig[r_orig < (actual_end - pos)]
 
         windows.append(dict(
             start_samp  = pos,
             end_samp    = actual_end,
             start_s     = pos / fs,
             end_s       = actual_end / fs,
-            n_beats     = n_beats,
-            mean_uc     = round(mean_uc, 4),
-            is_good     = is_good,
-            r_peaks_abs = r_abs,
+            n_beats     = len(r_rel),
+            mean_uc     = round(float(np.mean(uc)), 4),
+            is_good     = False,
+            r_peaks_abs = r_rel + pos,
         ))
-        pos += ss
 
     return windows
+
+
+def apply_threshold(windows: list, uc_thr: float) -> list:
+    """根据阈值设置每个窗口的 is_good。"""
+    for w in windows:
+        w["is_good"] = (w["mean_uc"] <= uc_thr) and (BEAT_MIN <= w["n_beats"] <= BEAT_MAX)
+    return windows
+
+
+def assess_quality(signal: np.ndarray, fs: int, model, device,
+                   uc_thr: float, infer_batch: int = 16,
+                   step_sec: float = STEP_SEC_DEF):
+    """推理 + 立即应用阈值（单文件固定阈值模式用）。"""
+    return apply_threshold(
+        run_inference(signal, fs, model, device, infer_batch, step_sec), uc_thr
+    )
 
 
 # ──────────────────────────────────────────────
@@ -158,45 +220,81 @@ def save_segments(signal, windows, fs, out_dir, base_name):
 # 可视化 1：全局概览（完整信号 + 窗口颜色 + 不确定性柱状图）
 # ──────────────────────────────────────────────
 
+def _coverage_spans(signal_len: int, windows: list, good: bool):
+    """
+    把 windows 里所有 is_good==good 的样本范围合并成连续区段列表，
+    返回 [(start_s, end_s), ...] 供 axvspan 绘制。
+    适用于大量重叠窗口，避免重复绘制。
+    """
+    mask = np.zeros(signal_len, dtype=bool)
+    for w in windows:
+        if w["is_good"] == good:
+            mask[w["start_samp"]: w["end_samp"]] = True
+
+    spans = []
+    in_span = False
+    for i, v in enumerate(mask):
+        if v and not in_span:
+            start = i; in_span = True
+        elif not v and in_span:
+            spans.append((start, i)); in_span = False
+    if in_span:
+        spans.append((start, signal_len))
+    return spans
+
+
 def plot_overview(signal, windows, fs, uc_thr, out_path):
-    t = np.arange(len(signal)) / fs
+    t        = np.arange(len(signal)) / fs
+    n_good   = sum(w["is_good"] for w in windows)
+    n_total  = len(windows)
+    step_sec = windows[1]["start_s"] - windows[0]["start_s"] if len(windows) > 1 else 8.0
+    dense    = step_sec < 4.0          # 密集滑动窗口模式
 
     fig, (ax_ecg, ax_uc) = plt.subplots(
         2, 1, figsize=(20, 6), sharex=True,
         gridspec_kw={"height_ratios": [3, 1.2]}
     )
 
-    # ECG 信号 + 背景色块
+    # ── ECG 信号 ─────────────────────────────────
     ax_ecg.plot(t, signal, lw=0.35, color="steelblue", alpha=0.85, rasterized=True)
-    for w in windows:
-        ax_ecg.axvspan(
-            w["start_s"], w["end_s"],
-            alpha=0.13 if w["is_good"] else 0.08,
-            color=COLOR_GOOD if w["is_good"] else COLOR_BAD,
-            lw=0
-        )
-    n_good  = sum(w["is_good"] for w in windows)
-    n_total = len(windows)
+
+    # 连续区段着色（无论窗口多密集都只画有限个矩形）
+    for s, e in _coverage_spans(len(signal), windows, good=True):
+        ax_ecg.axvspan(s / fs, e / fs, alpha=0.18, color=COLOR_GOOD, lw=0)
+    for s, e in _coverage_spans(len(signal), windows, good=False):
+        ax_ecg.axvspan(s / fs, e / fs, alpha=0.10, color=COLOR_BAD,  lw=0)
+
     ax_ecg.set_ylabel("CH20 (ADC counts)", fontsize=9)
     ax_ecg.set_title(
         f"{os.path.basename(out_path)}  |  "
         f"Green=good ({n_good}/{n_total})  Red=low-quality  "
-        f"threshold mean(U_E+U_A) <= {uc_thr}",
+        f"threshold mean(U_E+U_A) <= {uc_thr:.3f}  step={step_sec:.0f}s",
         fontsize=8.5, pad=5
     )
     ax_ecg.tick_params(labelsize=8)
     ax_ecg.spines["top"].set_visible(False)
     ax_ecg.spines["right"].set_visible(False)
 
-    # 不确定性柱状图
-    xs     = [(w["start_s"] + w["end_s"]) / 2 for w in windows]
-    # 截断到 3 倍阈值，防止坏窗口撑高 y 轴
-    ucs    = [min(w["mean_uc"], uc_thr * 3) for w in windows]
-    colors = [COLOR_GOOD if w["is_good"] else COLOR_BAD for w in windows]
-    bar_w  = STEP_SEC * 0.75
-    ax_uc.bar(xs, ucs, width=bar_w, color=colors, alpha=0.75, edgecolor="none")
+    # ── 不确定性图 ────────────────────────────────
+    xs  = np.array([(w["start_s"] + w["end_s"]) / 2 for w in windows])
+    ucs = np.array([min(w["mean_uc"], uc_thr * 3) for w in windows])
+
+    if dense:
+        # 折线 + 填色（密集窗口时比 bar 清晰）
+        good_mask = np.array([w["is_good"] for w in windows])
+        ax_uc.fill_between(xs, ucs, 0, where=good_mask,
+                           color=COLOR_GOOD, alpha=0.55, lw=0, label="good")
+        ax_uc.fill_between(xs, ucs, 0, where=~good_mask,
+                           color=COLOR_BAD,  alpha=0.45, lw=0, label="low-quality")
+        ax_uc.plot(xs, ucs, lw=0.6, color="steelblue", alpha=0.7)
+    else:
+        # 柱状图（稀疏窗口时更直观）
+        bar_w  = step_sec * 0.75
+        colors = [COLOR_GOOD if w["is_good"] else COLOR_BAD for w in windows]
+        ax_uc.bar(xs, ucs, width=bar_w, color=colors, alpha=0.75, edgecolor="none")
+
     ax_uc.axhline(uc_thr, color="gray", lw=1.0, linestyle="--",
-                  label=f"threshold {uc_thr}")
+                  label=f"threshold {uc_thr:.3f}")
     ax_uc.set_ylabel("mean(U_E+U_A)", fontsize=8)
     ax_uc.set_xlabel("Time (s)", fontsize=9)
     ax_uc.tick_params(labelsize=8)
@@ -278,33 +376,45 @@ def plot_good_segments(signal, good_windows, fs, out_path, max_cols=3):
 # 单文件处理（单模式和批量模式共用）
 # ──────────────────────────────────────────────
 
-def process_one_file(csv_path: str, fs: int, model, device,
-                     uc_thr: float, out_dir: str = None):
-    """
-    处理单个 CSV/Excel 文件，输出放在文件同目录下。
-    返回包含每文件统计信息的 dict，供批量汇总使用；
-    若文件无 CH20 列则返回 None。
-    """
+def load_signal(csv_path: str):
+    """读取文件，返回 (signal, df) 或 (None, None) 若无 CH20 列。"""
     if csv_path.endswith(".csv"):
         df = pd.read_csv(csv_path)
     else:
         df = pd.read_excel(csv_path)
-
     upper_col = next((c for c in df.columns if str(c).upper() == "CH20"), None)
     if upper_col is None:
+        return None, None
+    return df[upper_col].values.astype(np.float32), df
+
+
+def process_one_file(csv_path: str, fs: int, model, device,
+                     uc_thr: float, out_dir: str = None,
+                     precomputed_windows: list = None,
+                     infer_batch: int = 16,
+                     step_sec: float = STEP_SEC_DEF):
+    """
+    处理单个文件：推理（或复用预计算窗口） → 阈值 → 保存 → 可视化。
+    precomputed_windows: 批量 auto 模式下已推理好的 windows，直接复用。
+    返回统计 dict 或 None（跳过）。
+    """
+    signal, _ = load_signal(csv_path)
+    if signal is None:
         print(f"  [跳过] 未找到 CH20 列：{csv_path}")
         return None
 
-    signal    = df[upper_col].values.astype(np.float32)
-    base_name = os.path.basename(csv_path).replace(".csv", "").replace(".xlsx", "")
-    file_dir  = os.path.dirname(os.path.abspath(csv_path))
-    seg_dir   = out_dir or os.path.join(file_dir, "quality_segments")
+    base_name  = os.path.basename(csv_path).replace(".csv", "").replace(".xlsx", "")
+    file_dir   = os.path.dirname(os.path.abspath(csv_path))
+    seg_dir    = out_dir or os.path.join(file_dir, "quality_segments")
     duration_s = len(signal) / fs
 
     print(f"\n>> {csv_path}")
-    print(f"   fs={fs}Hz  duration={duration_s:.1f}s  uc_thr={uc_thr}")
+    print(f"   fs={fs}Hz  duration={duration_s:.1f}s  uc_thr={uc_thr:.3f}")
 
-    windows      = assess_quality(signal, fs, model, device, uc_thr)
+    if precomputed_windows is not None:
+        windows = apply_threshold(precomputed_windows, uc_thr)
+    else:
+        windows = assess_quality(signal, fs, model, device, uc_thr, infer_batch, step_sec)
     n_good       = sum(w["is_good"] for w in windows)
     n_total      = len(windows)
     good_windows = save_segments(signal, windows, fs, seg_dir, base_name)
@@ -365,12 +475,17 @@ def main():
     ap.add_argument("--batch",   action="store_true",
                     help="开启批量模式，递归处理 --data_dir 下所有 CSV/Excel 文件")
     ap.add_argument("--fs",      required=True, type=int,    help="采样率 Hz")
-    ap.add_argument("--uc_thr",  default=UC_THR_DEF, type=float,
-                    help=f"不确定性阈值，默认 {UC_THR_DEF}（越低越严格）")
+    ap.add_argument("--uc_thr",  default=str(UC_THR_DEF),
+                    help=f"不确定性阈值，默认 {UC_THR_DEF}；填 'auto' 自动用 Otsu 方法决定")
     ap.add_argument("--out_dir", default=None,
                     help="NPZ 保存目录（单文件模式默认：CSV 同目录/quality_segments/；"
                          "批量模式默认：各 CSV 同目录下各自建 quality_segments/）")
-    ap.add_argument("--gpu",     default="0")
+    ap.add_argument("--gpu",         default="0")
+    ap.add_argument("--infer_batch", default=16, type=int,
+                    help="每次 GPU forward 的窗口数，越大越快（默认 16）")
+    ap.add_argument("--step",        default=STEP_SEC_DEF, type=float,
+                    help=f"滑动窗口步长（秒），默认 {STEP_SEC_DEF}s；"
+                         f"嘈杂数据可设 1~2s 以发现更多有效片段")
     args = ap.parse_args()
 
     # 参数校验
@@ -383,14 +498,37 @@ def main():
     print(f"加载模型... 设备: {device}")
     model = load_model(device)
 
+    # 解析 uc_thr（float 或 'auto'）
+    auto_thr = (args.uc_thr.strip().lower() == "auto")
+    uc_thr   = None if auto_thr else float(args.uc_thr)
+
     # ── 单文件模式 ──────────────────────────────
     if not args.batch:
-        stat = process_one_file(
-            args.csv, args.fs, model, device, args.uc_thr, args.out_dir
-        )
+        if auto_thr:
+            signal, _ = load_signal(args.csv)
+            if signal is None:
+                print("未找到 CH20 列")
+                return
+            print("Auto threshold: running inference...")
+            windows  = run_inference(signal, args.fs, model, device,
+                                     args.infer_batch, args.step)
+            uc_vals  = [w["mean_uc"] for w in windows]
+            uc_thr   = otsu_threshold(uc_vals)
+            print(f"Otsu threshold = {uc_thr:.4f}  "
+                  f"(uc range: {min(uc_vals):.3f} – {max(uc_vals):.3f})")
+            stat = process_one_file(
+                args.csv, args.fs, model, device, uc_thr, args.out_dir,
+                precomputed_windows=windows, infer_batch=args.infer_batch,
+                step_sec=args.step
+            )
+        else:
+            stat = process_one_file(
+                args.csv, args.fs, model, device, uc_thr, args.out_dir,
+                infer_batch=args.infer_batch, step_sec=args.step
+            )
         if stat:
             print(f"\nDone. good={stat['n_good']}/{stat['n_windows']} "
-                  f"({stat['good_ratio_pct']}%)")
+                  f"({stat['good_ratio_pct']}%)  uc_thr={uc_thr:.4f}")
         return
 
     # ── 批量模式 ────────────────────────────────
@@ -419,17 +557,58 @@ def main():
 
     data_dir_abs = os.path.abspath(args.data_dir)
     stats = []
-    for csv_path in all_files:
-        stat = process_one_file(
-            csv_path, args.fs, model, device, args.uc_thr, args.out_dir
-        )
-        if stat:
-            # 从相对路径提取行为标签（data_dir 下的第一级子目录名）
-            rel = os.path.relpath(csv_path, data_dir_abs)
-            parts = Path(rel).parts
-            stat["activity"] = parts[0] if len(parts) > 1 else "(root)"
-            stat["rel_path"] = rel
-            stats.append(stat)
+
+    if auto_thr:
+        # ── 批量 auto 模式：第一遍全量推理，汇集所有 mean_uc，再统一 Otsu 阈值 ──
+        print("Auto threshold (batch): pass 1 — running inference on all files...")
+        all_file_data = {}   # csv_path -> (signal, windows)
+        for csv_path in all_files:
+            signal, _ = load_signal(csv_path)
+            if signal is None:
+                print(f"  [skip] CH20 column not found: {csv_path}")
+                continue
+            print(f"  inferring: {csv_path}")
+            windows = run_inference(signal, args.fs, model, device,
+                                    args.infer_batch, args.step)
+            all_file_data[csv_path] = (signal, windows)
+
+        all_ucs = [w["mean_uc"]
+                   for _, (_, wins) in all_file_data.items()
+                   for w in wins]
+        if not all_ucs:
+            print("No valid windows found across all files.")
+            return
+
+        uc_thr = otsu_threshold(all_ucs)
+        print(f"\nOtsu threshold (pooled, {len(all_ucs)} windows) = {uc_thr:.4f}  "
+              f"(uc range: {min(all_ucs):.3f} – {max(all_ucs):.3f})")
+        print(f"pass 2 — applying threshold and generating outputs...\n{'─'*60}")
+
+        for csv_path, (_, windows) in all_file_data.items():
+            stat = process_one_file(
+                csv_path, args.fs, model, device, uc_thr, args.out_dir,
+                precomputed_windows=windows, infer_batch=args.infer_batch,
+                step_sec=args.step
+            )
+            if stat:
+                rel = os.path.relpath(csv_path, data_dir_abs)
+                parts = Path(rel).parts
+                stat["activity"] = parts[0] if len(parts) > 1 else "(root)"
+                stat["rel_path"] = rel
+                stats.append(stat)
+    else:
+        # ── 批量固定阈值模式 ──────────────────────
+        for csv_path in all_files:
+            stat = process_one_file(
+                csv_path, args.fs, model, device, uc_thr, args.out_dir,
+                infer_batch=args.infer_batch, step_sec=args.step
+            )
+            if stat:
+                rel = os.path.relpath(csv_path, data_dir_abs)
+                parts = Path(rel).parts
+                stat["activity"] = parts[0] if len(parts) > 1 else "(root)"
+                stat["rel_path"] = rel
+                stats.append(stat)
 
     if not stats:
         print("No files processed.")

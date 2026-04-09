@@ -67,7 +67,11 @@ python apply_pnqrs.py --data_dir /path/to/data --fs 1000
 
 ```bash
 cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
-python extract_quality_segments.py --csv /path/to/data.csv --fs 1000
+# 自动阈值（推荐可穿戴数据）
+python extract_quality_segments.py --csv /path/to/data.csv --fs 1000 --uc_thr auto
+
+# 批量处理（按行为子目录分组）
+python extract_quality_segments.py --batch --data_dir /path/to/data_dir --fs 1000 --uc_thr auto
 ```
 
 ### 窗口示意
