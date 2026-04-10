@@ -223,11 +223,12 @@ def visualize_low_amp_global(all_files: list, data_dir: str, fs: int,
     """
     out_dir = out_dir or data_dir
 
-    # ── Pass 1：收集所有窗口的峰峰值 ────────────────────────────────────────
-    win_samp = int(win_sec * fs)
-    all_windows = []   # list of (ptp, csv_path, start_sample)
+    # ── Pass 1：收集所有窗口的峰峰值 + CV_RR ────────────────────────────────
+    win_samp  = int(win_sec * fs)
+    rp_suffix = "CH20" if channel.upper() == "CH20" else "CH1-8"
+    all_windows = []   # list of (ptp, cv_rr_or_nan, csv_path, start_sample)
 
-    print(f"\nPass 1: computing {channel} amplitude across {len(all_files)} files...")
+    print(f"\nPass 1: computing {channel} amplitude + CV_RR across {len(all_files)} files...")
     for i, fpath in enumerate(all_files, 1):
         print(f"  [{i}/{len(all_files)}] {os.path.relpath(fpath, data_dir)}", flush=True)
         try:
@@ -238,9 +239,16 @@ def visualize_low_amp_global(all_files: list, data_dir: str, fs: int,
         if ch_col is None:
             continue
         sig = df[ch_col].values.astype(float)
+        rp  = load_rpeaks(fpath, rp_suffix)
         for s in range(0, len(sig) - win_samp + 1, win_samp):
             ptp = float(np.ptp(sig[s: s + win_samp]))
-            all_windows.append((ptp, fpath, s))
+            win_rp = rp[(rp >= s) & (rp < s + win_samp)]
+            if len(win_rp) >= 3:
+                rr    = np.diff(win_rp.astype(float)) / fs
+                cv_rr = float(np.std(rr) / (np.mean(rr) + 1e-9))
+            else:
+                cv_rr = float("nan")
+            all_windows.append((ptp, cv_rr, fpath, s))
 
     if not all_windows:
         print(f"未找到含 {channel} 的文件。")
@@ -270,6 +278,44 @@ def visualize_low_amp_global(all_files: list, data_dir: str, fs: int,
     plt.close()
     print(f"  分布图 → {hist_path}")
 
+    # ── 散点图：amplitude vs CV_RR，线性回归 ─────────────────────────────────
+    from scipy import stats as _stats
+    pts = [(ptp, cv) for ptp, cv, *_ in all_windows if not np.isnan(cv)]
+    if len(pts) >= 5:
+        xs = np.array([p[0] for p in pts])
+        ys = np.array([p[1] for p in pts])
+        slope, intercept, r, p_val, _ = _stats.linregress(xs, ys)
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.scatter(xs, ys, s=8, alpha=0.35, color="steelblue", linewidths=0,
+                   label=f"windows (n={len(xs)})")
+
+        x_line = np.linspace(xs.min(), xs.max(), 200)
+        ax.plot(x_line, slope * x_line + intercept, color="red", lw=2,
+                label=f"fit: slope={slope:.4f}  R²={r**2:.3f}  p={p_val:.4g}")
+
+        sig_str = "YES (p<0.05)" if p_val < 0.05 else "NO (p>=0.05)"
+        ax.set_xlabel(f"{channel} peak-to-peak amplitude", fontsize=11)
+        ax.set_ylabel("CV_RR  (std/mean of RR intervals)", fontsize=11)
+        ax.set_title(
+            f"Amplitude vs RR regularity — slope significantly != 0? {sig_str}\n"
+            f"slope={slope:.4f}  intercept={intercept:.4f}  "
+            f"R²={r**2:.3f}  p={p_val:.4g}",
+            fontsize=10
+        )
+        ax.legend(fontsize=9)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        plt.tight_layout()
+        scatter_path = os.path.join(out_dir, f"global_{channel}_amp_vs_cvrr.png")
+        plt.savefig(scatter_path, dpi=130, bbox_inches="tight")
+        plt.close()
+        print(f"  散点图（amplitude vs CV_RR）→ {scatter_path}")
+        print(f"    slope={slope:.4f}  R²={r**2:.3f}  p={p_val:.4g}  "
+              f"slope sig.? {sig_str}")
+    else:
+        print("  CV_RR 有效窗口不足 5 个，跳过散点图。")
+
     # ── Pass 2：取低/中/高三组，合并成一张对比图 ─────────────────────────────
     all_windows.sort(key=lambda x: x[0])
     n_avail = len(all_windows)
@@ -286,8 +332,7 @@ def visualize_low_amp_global(all_files: list, data_dir: str, fs: int,
     n_rows_g = (n_each + n_cols - 1) // n_cols   # rows per group
     n_rows   = n_rows_g * 3                       # total rows
 
-    rp_suffix = "CH20" if channel.upper() == "CH20" else "CH1-8"
-    color     = "darkorange" if channel.upper() == "CH20" else "steelblue"
+    color = "darkorange" if channel.upper() == "CH20" else "steelblue"
 
     fig, axes = plt.subplots(n_rows, n_cols,
                              figsize=(6 * n_cols, 3 * n_rows),
@@ -308,7 +353,7 @@ def visualize_low_amp_global(all_files: list, data_dir: str, fs: int,
 
     for g_idx, (g_name, segs) in enumerate(groups):
         row_offset = g_idx * n_rows_g
-        for s_idx, (ptp_val, fpath, start_s) in enumerate(segs):
+        for s_idx, (ptp_val, _cv_rr, fpath, start_s) in enumerate(segs):
             row = row_offset + s_idx // n_cols
             col = s_idx % n_cols
             ax  = axes[row][col]
