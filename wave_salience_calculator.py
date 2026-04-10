@@ -461,10 +461,27 @@ class WaveSalienceCalculator(_BaseSalienceCalculator):
 # ---------------------------------------------------------------------------
 # 文件 I/O（与 extract_quality_segments.py 保持一致）
 # ---------------------------------------------------------------------------
+def _read_csv_robust(path: str) -> pd.DataFrame:
+    """pd.read_csv，自动截断末尾多余空列，不丢任何数据行。"""
+    import io
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        raw = fh.readlines()
+    if not raw:
+        return pd.DataFrame()
+    ncols = len(raw[0].split(","))
+    fixed = []
+    for line in raw:
+        fields = line.rstrip("\n").split(",")
+        if len(fields) != ncols:
+            fields = fields[:ncols]
+        fixed.append(",".join(fields))
+    return pd.read_csv(io.StringIO("\n".join(fixed)))
+
+
 def load_signal(csv_path: str):
     """读取文件，返回 (signal, df) 或 (None, None) 若无 CH20 列。"""
     if csv_path.endswith(".csv"):
-        df = pd.read_csv(csv_path)
+        df = _read_csv_robust(csv_path)
     else:
         df = pd.read_excel(csv_path)
     upper_col = next((c for c in df.columns if str(c).upper() == "CH20"), None)
