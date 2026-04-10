@@ -292,14 +292,14 @@ def visualize_low_amp_global(all_files: list, data_dir: str, fs: int,
 
         x_line = np.linspace(xs.min(), xs.max(), 200)
         ax.plot(x_line, slope * x_line + intercept, color="red", lw=2,
-                label=f"fit: slope={slope:.4f}  R²={r**2:.3f}  p={p_val:.4g}")
+                label=f"fit: slope={slope:.4g}  R²={r**2:.3f}  p={p_val:.4g}")
 
         sig_str = "YES (p<0.05)" if p_val < 0.05 else "NO (p>=0.05)"
         ax.set_xlabel(f"{channel} peak-to-peak amplitude", fontsize=11)
         ax.set_ylabel("CV_RR  (std/mean of RR intervals)", fontsize=11)
         ax.set_title(
             f"Amplitude vs RR regularity — slope significantly != 0? {sig_str}\n"
-            f"slope={slope:.4f}  intercept={intercept:.4f}  "
+            f"slope={slope:.4g}  intercept={intercept:.4g}  "
             f"R²={r**2:.3f}  p={p_val:.4g}",
             fontsize=10
         )
@@ -311,7 +311,7 @@ def visualize_low_amp_global(all_files: list, data_dir: str, fs: int,
         plt.savefig(scatter_path, dpi=130, bbox_inches="tight")
         plt.close()
         print(f"  散点图（amplitude vs CV_RR）→ {scatter_path}")
-        print(f"    slope={slope:.4f}  R²={r**2:.3f}  p={p_val:.4g}  "
+        print(f"    slope={slope:.4g}  R²={r**2:.3f}  p={p_val:.4g}  "
               f"slope sig.? {sig_str}")
     else:
         print("  CV_RR 有效窗口不足 5 个，跳过散点图。")
