@@ -212,6 +212,120 @@ def visualize_low_amp(csv_path: str, fs: int, channels: str,
     plt.close()
 
 
+def visualize_low_amp_global(all_files: list, data_dir: str, fs: int,
+                             channel: str = "CH20", win_sec: float = 10.0,
+                             top_n: int = 12, out_dir: str | None = None):
+    """
+    跨文件全局低幅度分析：
+      1. 扫描所有文件，统计指定 channel 每个窗口的峰峰值
+      2. 画全局幅度分布直方图（含 25/50 百分位线）
+      3. 取全局幅度最低的 top_n 个窗口，网格可视化 + R-peak 标注
+    """
+    out_dir = out_dir or data_dir
+
+    # ── Pass 1：收集所有窗口的峰峰值 ────────────────────────────────────────
+    win_samp = int(win_sec * fs)
+    all_windows = []   # list of (ptp, csv_path, start_sample)
+
+    print(f"\nPass 1: computing {channel} amplitude across {len(all_files)} files...")
+    for i, fpath in enumerate(all_files, 1):
+        print(f"  [{i}/{len(all_files)}] {os.path.relpath(fpath, data_dir)}", flush=True)
+        try:
+            df = pd.read_csv(fpath)
+        except Exception:
+            continue
+        ch_col = next((c for c in df.columns if str(c).upper() == channel.upper()), None)
+        if ch_col is None:
+            continue
+        sig = df[ch_col].values.astype(float)
+        for s in range(0, len(sig) - win_samp + 1, win_samp):
+            ptp = float(np.ptp(sig[s: s + win_samp]))
+            all_windows.append((ptp, fpath, s))
+
+    if not all_windows:
+        print(f"未找到含 {channel} 的文件。")
+        return
+
+    all_ptp = [w[0] for w in all_windows]
+    p25, p50 = float(np.percentile(all_ptp, 25)), float(np.percentile(all_ptp, 50))
+    print(f"\n全局统计（{len(all_windows)} 个窗口）：")
+    print(f"  min={min(all_ptp):.4f}  p25={p25:.4f}  p50={p50:.4f}  max={max(all_ptp):.4f}")
+
+    # ── 分布直方图 ────────────────────────────────────────────────────────────
+    os.makedirs(out_dir, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(9, 4))
+    ax.hist(all_ptp, bins=50, color="steelblue", alpha=0.75, edgecolor="none")
+    ax.axvline(p25, color="orange", lw=1.5, label=f"p25={p25:.3f}")
+    ax.axvline(p50, color="red",    lw=1.5, label=f"p50={p50:.3f}")
+    ax.set_xlabel(f"{channel} peak-to-peak amplitude (raw ADC units)", fontsize=10)
+    ax.set_ylabel("Window count", fontsize=10)
+    ax.set_title(f"Global {channel} amplitude distribution — {len(all_files)} files, "
+                 f"{len(all_windows)} windows ({win_sec:.0f}s each)", fontsize=10)
+    ax.legend(fontsize=9)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    plt.tight_layout()
+    hist_path = os.path.join(out_dir, f"global_{channel}_amp_distribution.png")
+    plt.savefig(hist_path, dpi=130, bbox_inches="tight")
+    plt.close()
+    print(f"  分布图 → {hist_path}")
+
+    # ── Pass 2：取全局最低 top_n 个窗口并可视化 ──────────────────────────────
+    all_windows.sort(key=lambda x: x[0])
+    low_segs = all_windows[:min(top_n, len(all_windows))]
+    n_show   = len(low_segs)
+
+    n_cols = min(3, n_show)
+    n_rows = (n_show + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(n_rows, n_cols,
+                             figsize=(6 * n_cols, 3 * n_rows),
+                             squeeze=False)
+    fig.suptitle(
+        f"Globally lowest {n_show} {channel} amplitude windows "
+        f"(window={win_sec:.0f}s)  |  red dots = R-peaks",
+        fontsize=10, y=1.01
+    )
+
+    for idx, (ptp_val, fpath, start_s) in enumerate(low_segs):
+        row, col = divmod(idx, n_cols)
+        ax = axes[row][col]
+
+        try:
+            df  = pd.read_csv(fpath)
+        except Exception:
+            ax.set_visible(False)
+            continue
+        ch_col = next((c for c in df.columns if str(c).upper() == channel.upper()), None)
+        if ch_col is None:
+            ax.set_visible(False)
+            continue
+
+        seg = df[ch_col].values[start_s: start_s + win_samp].astype(float)
+        rp  = load_rpeaks(fpath, "CH20" if channel.upper() == "CH20" else "CH1-8")
+        color = "darkorange" if channel.upper() == "CH20" else "steelblue"
+        plot_channel(ax, seg, rp, fs, start_s, channel, color=color)
+
+        mask    = (rp >= start_s) & (rp < start_s + win_samp)
+        n_beats = int(mask.sum())
+        t_start = start_s / fs
+        rel     = os.path.relpath(fpath, data_dir)
+        ax.set_title(
+            f"{rel}\n{t_start:.1f}–{t_start+win_sec:.1f}s  ptp={ptp_val:.4f}  {n_beats} beats",
+            fontsize=7
+        )
+
+    # 隐藏多余格子
+    for empty in range(n_show, n_rows * n_cols):
+        r, c = divmod(empty, n_cols)
+        axes[r][c].set_visible(False)
+
+    plt.tight_layout()
+    grid_path = os.path.join(out_dir, f"global_{channel}_low_amp_windows.png")
+    plt.savefig(grid_path, dpi=130, bbox_inches="tight")
+    plt.close()
+    print(f"  低幅度网格图 → {grid_path}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     # 单文件 / 批量互斥
@@ -244,11 +358,15 @@ def main():
             print(f"未找到 CSV/Excel 文件：{args.data_dir}")
             return
         print(f"找到 {len(all_files)} 个文件\n{'─'*50}")
-        for i, f in enumerate(all_files, 1):
-            print(f"\n[{i}/{len(all_files)}] {os.path.relpath(f, args.data_dir)}", flush=True)
-            if args.low_amp:
-                visualize_low_amp(f, args.fs, args.channels, args.win_sec, args.top_n)
-            else:
+        if args.low_amp:
+            # 批量 + low_amp → 全局排序模式
+            ch = args.channels if args.channels != "all" else "CH20"
+            visualize_low_amp_global(all_files, args.data_dir, args.fs,
+                                     channel=ch, win_sec=args.win_sec,
+                                     top_n=args.top_n)
+        else:
+            for i, f in enumerate(all_files, 1):
+                print(f"\n[{i}/{len(all_files)}] {os.path.relpath(f, args.data_dir)}", flush=True)
                 visualize_one(f, args.fs, args.start, args.duration, args.channels)
 
     elif args.csv:
