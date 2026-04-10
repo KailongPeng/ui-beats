@@ -9,7 +9,7 @@ related: "[[PN_QRS_解读]]"
 
 # PN-QRS 应用于自采 Excel ECG 数据
 
-> ← [[index|返回索引]] | 实现代码：`PN-QRS/apply_pnqrs.py` · `PN-QRS/visualize_rpeaks.py` · `PN-QRS/evaluate_upper_arm.py` · `PN-QRS/extract_quality_segments.py`
+> ← [[index|返回索引]] | 实现代码：`PN-QRS/apply_pnqrs.py` · `PN-QRS/visualize_rpeaks.py` · `PN-QRS/evaluate_upper_arm.py` · `PN-QRS/extract_quality_segments.py` · `PN-QRS/wave_salience_calculator.py`
 
 ---
 
@@ -228,6 +228,95 @@ TOTAL                           1742.0      218    151   69.3%
 | `batch_uc_distribution.png` | `data_dir` 根目录 | 批量 auto 模式专有：所有文件的 mean_uc pooled 分布 + Otsu 阈值线 |
 
 **原理**：`uncertain_est()` 逐帧计算认知不确定性（eu）和偶然不确定性（au），将 `eu > 0.12` 的帧二值化为 10，然后对 `eu + au` 取窗口均值得到 `mean_uc`。该值本质上反映了窗口内**噪声帧的占比**：干净信号 ~0.1–0.5，电极脱落 ~10。详见 [[PN_QRS_to_ECGFounder_pipeline#质量分数的含义]]。
+
+---
+
+## 波形显著性 SQI（P/Q/S/T 波质量评估）
+
+`mean_uc` 只回答"QRS 找不找得到"，不回答"P 波 / T 波 / ST 段可不可见"。对于设备验证和需要完整 PQRST 形态的下游任务（如心梗检测），需要额外的形态学质量评估。
+
+`wave_salience_calculator.py` 基于 NeuroKit2 波形检测，计算每个波段（P/Q/S/T）相对于 R 波的**显著性分数**（salience）和**检出率**（detection rate），并以检出率为权重计算综合评分。
+
+### 快速开始
+
+```bash
+cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
+
+# 单文件分析
+python wave_salience_calculator.py --csv /path/to/data.csv --fs 1000
+
+# 输出逐段明细
+python wave_salience_calculator.py --csv /path/to/data.csv --fs 1000 --detail
+
+# 批量模式（按行为子目录分组）
+python wave_salience_calculator.py --batch --data_dir /path/to/data_dir --fs 1000
+```
+
+### 输出示例
+
+```
+>> data.csv
+   fs=1000Hz  duration=120.0s  segments=12
+   P: salience=0.127  detection=73.2%  (104/142)
+   Q: salience=0.085  detection=91.5%  (130/142)
+   S: salience=0.203  detection=95.8%  (136/142)
+   T: salience=0.312  detection=80.3%  (114/142)
+   composite=0.207
+```
+
+### 参数一览
+
+| 参数 | 说明 | 默认 |
+|------|------|------|
+| `--csv` | 单文件模式：CSV/Excel 路径 | 必填（单文件）|
+| `--data_dir` | 批量模式：根目录路径 | 必填（批量）|
+| `--batch` | 开启批量模式 | 关闭 |
+| `--fs` | 采样率 Hz | 必填 |
+| `--segment_sec` | 分析片段长度（秒）| `10` |
+| `--detail` | 输出逐段明细 CSV | 关闭 |
+| `--out_dir` | 输出目录（不指定则放 CSV 旁）| 自动 |
+
+### 输出文件
+
+| 文件 | 内容 |
+|------|------|
+| `*_wave_sqi.csv` | 汇总：各波 salience、detection_rate、composite |
+| `*_wave_sqi_detail.csv` | 逐段明细（`--detail` 时生成）|
+| `batch_wave_sqi_summary.csv` | 批量汇总（`--batch` 时生成）|
+
+### 各波评分含义
+
+| 指标 | 计算 | 含义 |
+|------|------|------|
+| salience | `median(|wave_amp| / |R_amp|)` | 该波相对 R 波的幅度比值（0-1）|
+| detection_rate | `n_detected / n_R_peaks` | 该波被检出的心拍占比 |
+| composite | `Σ(salience × detection_rate) / Σ(detection_rate)` | 加权综合 |
+
+### 上臂导联 CH20 参考范围
+
+| 波段 | 临床 ECG 典型值 | 上臂 CH20 预期范围 | 说明 |
+|------|---------------|------------------|------|
+| P | 0.10–0.25 | **0.05–0.15** | 上臂 P 波很弱，检出率 < 70% 正常 |
+| Q | 0.05–0.15 | 0.03–0.10 | Q 波幅度小 |
+| S | 0.10–0.30 | 0.10–0.25 | S 波相对稳定 |
+| T | 0.20–0.40 | **0.15–0.35** | T 波检出率应 > 80%，否则 ST 分析不可靠 |
+
+### 类结构
+
+```
+SQICalculatorRole (ABC)
+  └── _BaseSalienceCalculator
+        ├── _get_wave_array()       ← 提取波峰位置
+        ├── _get_amplitudes()       ← 提取振幅
+        ├── _filter_intervals()     ← 过滤不合理间期
+        ├── _compute_salience_score()← 振幅→分数
+        ├── _segment_by_gaps()      ← 按 R-peak 间隔分段
+        ├── PWaveSalienceCalculator  (PR: 80-300ms)
+        ├── QWaveSalienceCalculator  (QR: 10-80ms)
+        ├── SWaveSalienceCalculator  (SR: 10-80ms)
+        ├── TWaveSalienceCalculator  (TR: 100-500ms)
+        └── WaveSalienceCalculator   综合评分（检出率加权）
+```
 
 ---
 

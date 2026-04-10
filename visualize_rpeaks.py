@@ -95,7 +95,7 @@ def main():
     axes[0].set_title(
         f"{os.path.basename(args.csv)}  |  "
         f"{args.start:.0f}–{args.start + args.duration:.0f}s  |  "
-        f"红点 = R-peak",
+        f"red dots = R-peaks",
         fontsize=9, pad=6
     )
 

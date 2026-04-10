@@ -245,9 +245,15 @@ def main():
     print(f"模型就绪，设备: {device}\n{'─'*50}")
 
     files = sorted(
-        glob.glob(os.path.join(args.data_dir, "*.xlsx")) +
-        glob.glob(os.path.join(args.data_dir, "*.csv"))
+        glob.glob(os.path.join(args.data_dir, "**", "*.xlsx"), recursive=True) +
+        glob.glob(os.path.join(args.data_dir, "**", "*.csv"),  recursive=True)
     )
+    # 跳过脚本自身生成的结果文件
+    files = [f for f in files if not any(
+        f.endswith(s) for s in ("_rpeaks.csv", "_quality_report.csv",
+                                "_wave_sqi.csv", "_wave_sqi_detail.csv",
+                                "rpeaks_summary.json")
+    )]
     print(f"找到 {len(files)} 个文件\n")
 
     all_results = []

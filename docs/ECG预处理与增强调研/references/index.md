@@ -23,6 +23,8 @@ up: "[[../index]]"
 - [[wearable_ECG_datasets]] — 可穿戴/非标准导联开源数据集汇总
 - [[PN_QRS_on_custom_ECG]] ⭐ — **自采 Excel ECG 数据应用 PN-QRS 指南**
 - [[PN_QRS_to_ECGFounder_pipeline]] — PN-QRS 结果如何为 ECGFounder 提供训练数据（质量过滤 + 滑动窗口切片）
+- [[PN_QRS_uncertainty_analysis]] — U_E/U_A 论文定义 vs 代码实现精读；mean_uc 的本质是噪声帧占比加权计数
+- [[device_validation]] ⭐ — **新设备信号质量验证指南**：PN-QRS 筛查 + R-peak 一致性 + 形态学分析（模板相关/SNR/基线漂移）
 
 ### HTML 报告（点击在浏览器中打开）
 
@@ -63,3 +65,5 @@ PN_QRS_复现报告.html
 | 把自采 Excel 数据跑出 R-peak | [[PN_QRS_on_custom_ECG]] |
 | 理解为何单导联模型可用于多导联 | [[PN_QRS_解读#Section 21]] |
 | 把自采数据接入 ECGFounder 训练 | [[PN_QRS_to_ECGFounder_pipeline]] |
+| 验证新设备信号质量（形态学分析）| [[device_validation]] |
+| 理解 mean_uc 与论文定义的关系 | [[PN_QRS_uncertainty_analysis]] |

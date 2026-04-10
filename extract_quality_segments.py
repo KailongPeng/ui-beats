@@ -397,6 +397,7 @@ def plot_uc_distribution(uc_values: list, uc_thr: float, out_path: str,
     uc range 跨度大 → 双峰明显 → 阈值可信；跨度小 → 单峰 → 提示手动设置。
     """
     ucs = np.array(uc_values, dtype=float)
+    ucs = ucs[np.isfinite(ucs)]   # 过滤 NaN / inf
     n   = len(ucs)
     if n == 0:
         return

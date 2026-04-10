@@ -78,7 +78,7 @@ def main():
     args = ap.parse_args()
 
     # 找所有有 CH1-8 结果的文件（说明这个文件跑过 apply_pnqrs.py）
-    ref_files = sorted(glob.glob(os.path.join(args.data_dir, "*_CH1-8_rpeaks.csv")))
+    ref_files = sorted(glob.glob(os.path.join(args.data_dir, "**", "*_CH1-8_rpeaks.csv"), recursive=True))
     if not ref_files:
         print("未找到 *_CH1-8_rpeaks.csv，请先运行 apply_pnqrs.py")
         return
