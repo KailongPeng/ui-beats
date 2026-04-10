@@ -358,3 +358,113 @@ recording
 - **CH1–8（多导联）**：每条导联独立推理，逐帧选 U_E 最小的导联（论文 Algorithm 1）
 - **CH20（单导联）**：直接推理，无导联融合
 - 详见 [[PN_QRS_解读]] Section 5（U_E/U_A）和 Section 21（多导联融合）
+
+---
+
+## 完整流程示例（data/0410_real）
+
+### 数据结构
+
+```
+data/0410_real/
+  被试1/
+    坐姿抬手/      rec01.csv  rec02.csv  rec03.csv
+    坐姿手臂前后摇摆/ rec01.csv  rec02.csv  rec03.csv
+    慢走/          rec01.csv  rec02.csv  rec03.csv
+    站立坐下/      rec01.csv  rec02.csv  rec03.csv
+  被试2/
+    坐姿抬手/      rec01.csv  rec02.csv  rec03.csv
+    坐姿手臂前后摇摆/ rec01.csv  rec02.csv  rec03.csv
+    坐姿说话/      rec01.csv  rec02.csv  rec03.csv
+    慢走/          rec01.csv  rec02.csv  rec03.csv
+    站立坐下/      rec01.csv  rec02.csv  rec03.csv
+```
+
+每个 CSV：`timestamp` + `CH1~CH8` + `CH20`，35992 行，采样率 1000 Hz（约 36 秒）。  
+数据来源：4 段 MIMIC-IV 12 导联记录拼接后升采样至 1000 Hz，CH20 模拟上臂导联（lead II × 0.4 + 活动相关运动噪声）。
+
+> **3 级目录注意**：`--batch` 模式的 `activity` 列取的是**相对于 `data_dir` 的第一级子目录名**，即这里显示 `被试1 / 被试2`，而非具体活动名。如需按活动分组，可将 `data_dir` 指向单个被试目录（如 `data/0410_real/被试1`）。
+
+### 环境说明
+
+本机 base 环境的 PyTorch 编译 CUDA 版本与驱动不匹配，须通过 `conda run -n ECGFounder` 切换到兼容环境（RTX 5090，CUDA 12.8）：
+
+```bash
+cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
+CONDA="conda run -n ECGFounder"
+DATA="data/0410_real"
+```
+
+### 步骤 1：R-peak 检测
+
+```bash
+$CONDA python apply_pnqrs.py --data_dir $DATA --fs 1000 --gpu 0
+```
+
+输出：每个 CSV 旁生成 `*_CH1-8_rpeaks.csv` 和 `*_CH20_rpeaks.csv`，根目录生成 `rpeaks_summary.json`。
+
+### 步骤 2：R-peak 可视化
+
+```bash
+# 对单个文件可视化（指定时间段）
+$CONDA python visualize_rpeaks.py \
+  --csv $DATA/被试1/坐姿抬手/rec01.csv \
+  --fs 1000 --duration 20 \
+  --out $DATA/被试1/坐姿抬手/rec01_rpeaks_vis.png
+```
+
+### 步骤 3：不确定性质量分析
+
+```bash
+$CONDA python extract_quality_segments.py \
+  --batch --data_dir $DATA --fs 1000 --uc_thr auto --gpu 0
+```
+
+### 步骤 4：上臂导联评估
+
+```bash
+$CONDA python evaluate_upper_arm.py --data_dir $DATA --fs 1000
+```
+
+### 步骤 5：波形显著性 SQI
+
+```bash
+$CONDA python wave_salience_calculator.py --batch --data_dir $DATA --fs 1000
+```
+
+### 结果汇总
+
+**R-peak 检测（27 个文件，HR 范围 64–96 bpm）**
+
+| 活动 | HR 典型范围 | 说明 |
+|------|-----------|------|
+| 坐姿系列 | 66–88 bpm | 信号相对干净 |
+| 慢走 | 84–107 bpm | 运动伪迹明显 |
+| 站立坐下 | 69–96 bpm | 过渡动作有瞬间噪声 |
+
+**质量分析（extract_quality_segments，auto 阈值）**
+
+| 主体 | 总窗口 | 好窗口 | 好窗口比例 |
+|------|--------|--------|-----------|
+| 被试1 | 60 | 35 | 58.3% |
+| 被试2 | 75 | 48 | 64.0% |
+| **汇总** | **135** | **83** | **61.5%** |
+
+活动间差异：坐姿抬手 80–100% 好窗口；慢走仅 20–60%（运动伪迹导致 mean_uc 升高）。
+
+**上臂导联评估（evaluate_upper_arm，以 CH1-8 为参考）**
+
+| 指标 | 结果 |
+|------|------|
+| TP / FP / FN | 1246 / 50 / 40 |
+| Se（敏感度） | **96.89%** |
+| P+（精确率） | **96.14%** |
+| F1 | **96.51%** |
+
+**波形显著性 SQI（wave_salience_calculator）**
+
+| 波段 | 检出率 | 说明 |
+|------|--------|------|
+| P 波 | ~100% | 显著性 0.07–0.60（活动依赖） |
+| T 波 | ~77% | 运动伪迹下 T 波检出率下降符合预期 |
+| composite SQI | 0.31 | 上臂导联参考范围内 |
