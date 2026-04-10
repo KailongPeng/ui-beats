@@ -611,10 +611,12 @@ def process_batch(data_dir: str, fs: int,
     activity_results = defaultdict(list)
     all_summaries = []
 
-    for fpath in all_files:
+    n_files = len(all_files)
+    for i, fpath in enumerate(all_files, 1):
         rel = os.path.relpath(fpath, data_dir)
         parts = Path(rel).parts
         activity = parts[0] if len(parts) > 1 else "root"
+        print(f"[{i}/{n_files}] {rel}", flush=True)
 
         summary = process_one_file(fpath, fs, segment_sec, detail)
         if summary is None:

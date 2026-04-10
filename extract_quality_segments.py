@@ -643,14 +643,15 @@ def main():
 
     if auto_thr:
         # ── 批量 auto 模式：第一遍全量推理，汇集所有 mean_uc，再统一 Otsu 阈值 ──
-        print("Auto threshold (batch): pass 1 — running inference on all files...")
+        n_files = len(all_files)
+        print(f"Auto threshold (batch): pass 1 — running inference on all {n_files} files...")
         all_file_data = {}   # csv_path -> (signal, windows)
-        for csv_path in all_files:
+        for idx, csv_path in enumerate(all_files, 1):
             signal, _ = load_signal(csv_path)
             if signal is None:
-                print(f"  [skip] CH20 column not found: {csv_path}")
+                print(f"  [{idx}/{n_files}] [skip] CH20 column not found: {csv_path}")
                 continue
-            print(f"  inferring: {csv_path}")
+            print(f"  [{idx}/{n_files}] inferring: {os.path.relpath(csv_path, data_dir_abs)}", flush=True)
             windows = run_inference(signal, args.fs, model, device,
                                     args.infer_batch, args.step)
             all_file_data[csv_path] = (signal, windows)
@@ -670,9 +671,11 @@ def main():
             os.path.join(args.data_dir, "batch_uc_distribution.png"),
             title=f"Pooled distribution — {len(all_file_data)} files"
         )
+        n2 = len(all_file_data)
         print(f"pass 2 — applying threshold and generating outputs...\n{'─'*60}")
 
-        for csv_path, (_, windows) in all_file_data.items():
+        for idx2, (csv_path, (_, windows)) in enumerate(all_file_data.items(), 1):
+            print(f"  [{idx2}/{n2}] {os.path.relpath(csv_path, data_dir_abs)}", flush=True)
             stat = process_one_file(
                 csv_path, args.fs, model, device, uc_thr, args.out_dir,
                 precomputed_windows=windows, infer_batch=args.infer_batch,
@@ -686,7 +689,9 @@ def main():
                 stats.append(stat)
     else:
         # ── 批量固定阈值模式 ──────────────────────
-        for csv_path in all_files:
+        n_files = len(all_files)
+        for idx, csv_path in enumerate(all_files, 1):
+            print(f"[{idx}/{n_files}] {os.path.relpath(csv_path, data_dir_abs)}", flush=True)
             stat = process_one_file(
                 csv_path, args.fs, model, device, uc_thr, args.out_dir,
                 infer_batch=args.infer_batch, step_sec=args.step

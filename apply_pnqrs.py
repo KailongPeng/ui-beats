@@ -269,8 +269,9 @@ def main():
     print(f"找到 {len(files)} 个文件\n")
 
     all_results = []
-    for f in files:
-        print(f"\n>> {os.path.basename(f)}")
+    n = len(files)
+    for i, f in enumerate(files, 1):
+        print(f"\n[{i}/{n}] >> {os.path.basename(f)}", flush=True)
         all_results.append(process_file(f, model, device, args.fs))
 
     summary = os.path.join(args.data_dir, "rpeaks_summary.json")
