@@ -43,14 +43,16 @@ lines = rc_path.read_text().splitlines() if rc_path.exists() else []
 lines = [l for l in lines if not l.strip().startswith(("font.", "axes.unicode"))]
 lines += [
     f"font.family         : sans-serif",
-    f"font.sans-serif     : {FONT_NAME}, DejaVu Sans",
+    # DejaVu Sans first: handles Latin/ASCII (e.g. / + - numbers)
+    # Droid Sans Fallback second: handles CJK via matplotlib's per-glyph fallback
+    f"font.sans-serif     : DejaVu Sans, {FONT_NAME}",
     f"axes.unicode_minus  : False",
 ]
 rc_path.write_text("\n".join(lines) + "\n")
 print(f"已写入 matplotlibrc: {rc_path}")
 
 # 5. 验证：生成测试图
-matplotlib.rcParams["font.sans-serif"] = [FONT_NAME, "DejaVu Sans"]
+matplotlib.rcParams["font.sans-serif"] = ["DejaVu Sans", FONT_NAME]
 matplotlib.rcParams["axes.unicode_minus"] = False
 
 import matplotlib.pyplot as plt
