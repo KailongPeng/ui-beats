@@ -270,60 +270,96 @@ def visualize_low_amp_global(all_files: list, data_dir: str, fs: int,
     plt.close()
     print(f"  分布图 → {hist_path}")
 
-    # ── Pass 2：取全局最低 top_n 个窗口并可视化 ──────────────────────────────
+    # ── Pass 2：取低/中/高三组，合并成一张对比图 ─────────────────────────────
     all_windows.sort(key=lambda x: x[0])
-    low_segs = all_windows[:min(top_n, len(all_windows))]
-    n_show   = len(low_segs)
+    n_avail = len(all_windows)
+    n_each  = min(top_n, n_avail // 3)   # 三组各取 n_each 个
 
-    n_cols = min(3, n_show)
-    n_rows = (n_show + n_cols - 1) // n_cols
+    mid_start = (n_avail - n_each) // 2
+    groups = [
+        ("Low",    all_windows[:n_each]),
+        ("Mid",    all_windows[mid_start: mid_start + n_each]),
+        ("High",   all_windows[n_avail - n_each:]),
+    ]
+
+    n_cols   = min(3, n_each)
+    n_rows_g = (n_each + n_cols - 1) // n_cols   # rows per group
+    n_rows   = n_rows_g * 3                       # total rows
+
+    rp_suffix = "CH20" if channel.upper() == "CH20" else "CH1-8"
+    color     = "darkorange" if channel.upper() == "CH20" else "steelblue"
+
     fig, axes = plt.subplots(n_rows, n_cols,
                              figsize=(6 * n_cols, 3 * n_rows),
                              squeeze=False)
     fig.suptitle(
-        f"Globally lowest {n_show} {channel} amplitude windows "
-        f"(window={win_sec:.0f}s)  |  red dots = R-peaks",
-        fontsize=10, y=1.01
+        f"Global {channel} amplitude — Low / Mid / High  "
+        f"(window={win_sec:.0f}s, n={n_each} each)  |  red dots = R-peaks",
+        fontsize=11, y=1.005
     )
 
-    for idx, (ptp_val, fpath, start_s) in enumerate(low_segs):
-        row, col = divmod(idx, n_cols)
-        ax = axes[row][col]
+    # 左侧标注组名
+    group_label_rows = [0, n_rows_g, n_rows_g * 2]
+    group_colors     = ["#d62728", "#ff7f0e", "#2ca02c"]   # 红/橙/绿
 
-        try:
-            df  = pd.read_csv(fpath)
-        except Exception:
-            ax.set_visible(False)
-            continue
-        ch_col = next((c for c in df.columns if str(c).upper() == channel.upper()), None)
-        if ch_col is None:
-            ax.set_visible(False)
-            continue
+    # 全局窗口编号索引（用于控制台对照）
+    global_idx = {id(w): i for i, w in enumerate(all_windows, 1)}
 
-        seg = df[ch_col].values[start_s: start_s + win_samp].astype(float)
-        rp  = load_rpeaks(fpath, "CH20" if channel.upper() == "CH20" else "CH1-8")
-        color = "darkorange" if channel.upper() == "CH20" else "steelblue"
-        plot_channel(ax, seg, rp, fs, start_s, channel, color=color)
+    for g_idx, (g_name, segs) in enumerate(groups):
+        row_offset = g_idx * n_rows_g
+        for s_idx, (ptp_val, fpath, start_s) in enumerate(segs):
+            row = row_offset + s_idx // n_cols
+            col = s_idx % n_cols
+            ax  = axes[row][col]
 
-        mask    = (rp >= start_s) & (rp < start_s + win_samp)
-        n_beats = int(mask.sum())
-        t_start = start_s / fs
-        rel     = os.path.relpath(fpath, data_dir)
-        ax.set_title(
-            f"{rel}\n{t_start:.1f}–{t_start+win_sec:.1f}s  ptp={ptp_val:.4f}  {n_beats} beats",
-            fontsize=7
-        )
+            # 组名标记（每组第一个子图左上角）
+            if s_idx == 0:
+                ax.text(-0.18, 0.5, g_name, transform=ax.transAxes,
+                        fontsize=13, fontweight="bold", va="center", ha="center",
+                        rotation=90, color=group_colors[g_idx])
 
-    # 隐藏多余格子
-    for empty in range(n_show, n_rows * n_cols):
-        r, c = divmod(empty, n_cols)
-        axes[r][c].set_visible(False)
+            try:
+                df = pd.read_csv(fpath)
+            except Exception:
+                ax.set_visible(False)
+                continue
+            ch_col = next((c for c in df.columns if str(c).upper() == channel.upper()), None)
+            if ch_col is None:
+                ax.set_visible(False)
+                continue
+
+            seg = df[ch_col].values[start_s: start_s + win_samp].astype(float)
+            rp  = load_rpeaks(fpath, rp_suffix)
+            plot_channel(ax, seg, rp, fs, start_s, channel, color=color)
+
+            mask    = (rp >= start_s) & (rp < start_s + win_samp)
+            n_beats = int(mask.sum())
+            t_start = start_s / fs
+            win_id  = global_idx.get(id((ptp_val, fpath, start_s)),
+                                     all_windows.index((ptp_val, fpath, start_s)) + 1)
+            fname   = os.path.basename(fpath)   # ASCII only, no Chinese
+            # 控制台打印完整路径供对照
+            print(f"    [{g_name}#{s_idx+1}] {os.path.relpath(fpath, data_dir)}  "
+                  f"{t_start:.1f}-{t_start+win_sec:.1f}s  ptp={ptp_val:.4f}  {n_beats} beats")
+            ax.set_title(
+                f"[{g_name}#{s_idx+1}] {fname}\n"
+                f"{t_start:.1f}-{t_start+win_sec:.1f}s  ptp={ptp_val:.4f}  {n_beats} beats",
+                fontsize=7
+            )
+            # 组别背景色（淡）
+            ax.set_facecolor({0: "#fff0f0", 1: "#fffaf0", 2: "#f0fff0"}[g_idx])
+
+        # 隐藏本组多余格子
+        for empty in range(len(segs), n_rows_g * n_cols):
+            r = row_offset + empty // n_cols
+            c = empty % n_cols
+            axes[r][c].set_visible(False)
 
     plt.tight_layout()
-    grid_path = os.path.join(out_dir, f"global_{channel}_low_amp_windows.png")
+    grid_path = os.path.join(out_dir, f"global_{channel}_amp_comparison.png")
     plt.savefig(grid_path, dpi=130, bbox_inches="tight")
     plt.close()
-    print(f"  低幅度网格图 → {grid_path}")
+    print(f"  对比图（低/中/高）→ {grid_path}")
 
 
 def main():
