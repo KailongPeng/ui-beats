@@ -320,6 +320,78 @@ SQICalculatorRole (ABC)
 
 ---
 
+## 波形显著性 SQI（domain 库版，wave_salience_calculator_call.py）
+
+`wave_salience_calculator.py` 基于 NeuroKit2 自行实现波形检测。如果项目中已有 `_wave_salience_calculator.py`（domain SQI 库），可改用 `wave_salience_calculator_call.py` 作为调用层，它封装了相同的 P/Q/S/T/综合计算器接口，输出格式更结构化。
+
+### 前置条件
+
+**必须先运行 `apply_pnqrs.py`**，生成 `*_CH20_rpeaks.csv`（或 `*_CH1-8_rpeaks.csv`）。`wave_salience_calculator_call.py` 直接读取这些文件，不重复做 R-peak 检测。
+
+### 快速开始
+
+```bash
+cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
+
+# 单文件
+python wave_salience_calculator_call.py --csv /path/to/data.csv --fs 1000
+
+# 单文件 + 分波明细 CSV
+python wave_salience_calculator_call.py --csv /path/to/data.csv --fs 1000 --detail
+
+# 批量（递归扫描子目录）
+python wave_salience_calculator_call.py --batch --data_dir /path/to/data_dir --fs 1000
+
+# 批量 + 明细 + 指定输出目录
+python wave_salience_calculator_call.py --batch --data_dir /path/to/data_dir --fs 1000 --detail --out_dir /path/to/out
+```
+
+### 输出示例（终端）
+
+```
+[1/33] 被试1/坐姿抬手/rec01.csv
+  fs=1000Hz  duration=36.0s  r_peaks=49
+    P: value=0.082  confidence=100.0%  score=0.328
+    Q: value=0.051  confidence=94.2%   score=0.204
+    S: value=0.187  confidence=97.1%   score=0.748
+    T: value=0.241  confidence=81.3%   score=0.603
+  → composite  value=0.157  score=0.521  conf=93.2%
+
+──────────────────────────────────────────────────────────────────────────
+file                                       dur   P_val  P_conf   T_val  T_conf    comp
+──────────────────────────────────────────────────────────────────────────
+rec01.csv                                 36.0   0.082  100.0%   0.241   81.3%   0.521
+```
+
+### 参数一览
+
+| 参数 | 说明 | 默认 |
+|------|------|------|
+| `--csv` | 单文件模式：CSV/Excel 路径 | 必填（单文件）|
+| `--data_dir` | 批量模式：根目录路径 | 必填（批量）|
+| `--batch` | 开启批量模式 | 关闭 |
+| `--fs` | 采样率 Hz | 必填 |
+| `--detail` | 同时输出每个波的明细 CSV | 关闭 |
+| `--out_dir` | 输出目录（默认与 `--data_dir` 或 `--csv` 同目录）| 自动 |
+
+### 输出文件
+
+| 文件 | 内容 |
+|------|------|
+| `wave_sqi_summary_.csv` | 每个文件一行：`composite_value/score/conf` + `P/Q/S/T_value/confidence/score` |
+| `wave_sqi_detail_.csv` | 每波一行，含 `description` 字段（`--detail` 时生成）|
+
+### 与 wave_salience_calculator.py 的区别
+
+| 维度 | wave_salience_calculator.py | wave_salience_calculator_call.py |
+|------|----------------------------|---------------------------------|
+| 波形检测后端 | NeuroKit2（内置） | `_wave_salience_calculator.py`（domain 库）|
+| R-peak 来源 | 脚本内部重新检测 | 读取 `apply_pnqrs.py` 生成的 rpeaks CSV |
+| 输出字段 | salience / detection_rate / composite | value / confidence / score / description |
+| 适用场景 | 独立使用，无外部依赖 | 已跑过 apply_pnqrs，需要接入 domain SQI 框架 |
+
+---
+
 ## 评估上臂导联质量（CH20 vs CH1-8）
 
 以 12 导联融合结果为伪标准答案，量化上臂导联 CH20 的检测质量：
