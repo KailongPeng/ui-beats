@@ -62,8 +62,19 @@ def infer_fs(ts: pd.Series) -> int:
 
 def load_excel_ecg(path: str, fs_override: Optional[int] = None) -> ECGRecord:
     if path.endswith(".csv"):
-        # engine='python' 对末尾多余逗号/空列更宽容，不会因列数不一致而崩溃
-        df = pd.read_csv(path, engine="python")
+        # 有些文件某些行末尾有多余逗号，导致列数不一致。
+        # 先读 header 确定列数，截断多余字段后再解析，不丢任何数据行。
+        import io
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            raw = fh.readlines()
+        ncols = len(raw[0].split(","))
+        fixed = []
+        for line in raw:
+            fields = line.rstrip("\n").split(",")
+            if len(fields) != ncols:
+                fields = fields[:ncols]
+            fixed.append(",".join(fields))
+        df = pd.read_csv(io.StringIO("\n".join(fixed)))
     else:
         df = pd.read_excel(path)
     cols = df.columns.tolist()
