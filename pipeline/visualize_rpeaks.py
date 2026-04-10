@@ -294,8 +294,9 @@ def visualize_low_amp_global(all_files: list, data_dir: str, fs: int,
                              squeeze=False)
     fig.suptitle(
         f"Global {channel} amplitude — Low / Mid / High  "
-        f"(window={win_sec:.0f}s, n={n_each} each)  |  red dots = R-peaks",
-        fontsize=11, y=1.005
+        f"(window={win_sec:.0f}s, n={n_each} each)  |  red dots = R-peaks  |  "
+        f"cv_rr = std(RR)/mean(RR), low=regular/good, high=noisy/bad",
+        fontsize=10, y=1.005
     )
 
     # 左侧标注组名
@@ -335,15 +336,26 @@ def visualize_low_amp_global(all_files: list, data_dir: str, fs: int,
             mask    = (rp >= start_s) & (rp < start_s + win_samp)
             n_beats = int(mask.sum())
             t_start = start_s / fs
-            win_id  = global_idx.get(id((ptp_val, fpath, start_s)),
-                                     all_windows.index((ptp_val, fpath, start_s)) + 1)
             fname   = os.path.basename(fpath)   # ASCII only, no Chinese
+
+            # CV_RR: coefficient of variation of RR intervals
+            # low (~0.02-0.10) = regular rhythm / reliable detection
+            # high (>0.20)     = irregular / likely false peaks in noisy signal
+            win_rp = rp[mask]
+            if len(win_rp) >= 3:
+                rr = np.diff(win_rp.astype(float)) / fs   # RR intervals in seconds
+                cv_rr_str = f"{np.std(rr) / (np.mean(rr) + 1e-9):.3f}"
+            else:
+                cv_rr_str = "--"
+
             # 控制台打印完整路径供对照
             print(f"    [{g_name}#{s_idx+1}] {os.path.relpath(fpath, data_dir)}  "
-                  f"{t_start:.1f}-{t_start+win_sec:.1f}s  ptp={ptp_val:.4f}  {n_beats} beats")
+                  f"{t_start:.1f}-{t_start+win_sec:.1f}s  ptp={ptp_val:.4f}  "
+                  f"cv_rr={cv_rr_str}  {n_beats} beats")
             ax.set_title(
                 f"[{g_name}#{s_idx+1}] {fname}\n"
-                f"{t_start:.1f}-{t_start+win_sec:.1f}s  ptp={ptp_val:.4f}  {n_beats} beats",
+                f"{t_start:.1f}-{t_start+win_sec:.1f}s  "
+                f"ptp={ptp_val:.4f}  cv_rr={cv_rr_str}  {n_beats}beats",
                 fontsize=7
             )
             # 组别背景色（淡）
