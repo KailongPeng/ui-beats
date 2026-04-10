@@ -62,10 +62,8 @@ def infer_fs(ts: pd.Series) -> int:
 
 def load_excel_ecg(path: str, fs_override: Optional[int] = None) -> ECGRecord:
     if path.endswith(".csv"):
-        try:
-            df = pd.read_csv(path, on_bad_lines="skip")
-        except TypeError:
-            df = pd.read_csv(path, error_bad_lines=False)  # pandas < 1.4
+        # engine='python' 对末尾多余逗号/空列更宽容，不会因列数不一致而崩溃
+        df = pd.read_csv(path, engine="python")
     else:
         df = pd.read_excel(path)
     cols = df.columns.tolist()
