@@ -1,3 +1,4 @@
+import sys as _sys, os as _os; _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 """
 MIT-BIH Evaluation v3: Improvement 2+3 combined.
   - 2s overlap (from v2)

@@ -1,3 +1,4 @@
+import sys as _sys, os as _os; _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 """
 CPSC2019 官方评测协议：Se / P+ / F1
 - 模型输出 50Hz mask -> correct() 后处理得到 R-peak 位置（50Hz空间）

@@ -1,3 +1,4 @@
+import sys as _sys, os as _os; _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 """
 MIMIC-IV ECG Noise Proportion Estimation via PN-QRS U_E
 Uses 200 randomly sampled 10-s records; thresholds t=2.45 (aggressive) and t=3.20 (conservative).

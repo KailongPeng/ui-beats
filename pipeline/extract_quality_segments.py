@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import sys as _sys, os as _os; _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 """
 extract_quality_segments.py -- 基于 PN-QRS 不确定性评估 CH20 信号质量，提取高质量 10 秒片段
 

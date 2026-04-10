@@ -6,7 +6,7 @@ import re
 import glob
 import os
 
-LOG_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
 
 def parse_log(path):
     """Extract per-record and total TP/FP/FN from a group log."""

@@ -1,3 +1,4 @@
+import sys as _sys, os as _os; _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 """
 Train PN-QRS on real CPSC2019 data.
 Saves to experiments/logs_real/ - does NOT overwrite existing checkpoints.
