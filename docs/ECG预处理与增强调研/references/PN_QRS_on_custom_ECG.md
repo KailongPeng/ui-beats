@@ -9,7 +9,7 @@ related: "[[PN_QRS_解读]]"
 
 # PN-QRS 应用于自采 Excel ECG 数据
 
-> ← [[index|返回索引]] | 实现代码：`PN-QRS/apply_pnqrs.py` · `PN-QRS/visualize_rpeaks.py` · `PN-QRS/evaluate_upper_arm.py` · `PN-QRS/extract_quality_segments.py` · `PN-QRS/wave_salience_calculator.py`
+> ← [[index|返回索引]] | 实现代码：`PN-QRS/pipeline/apply_pnqrs.py` · `PN-QRS/pipeline/visualize_rpeaks.py` · `PN-QRS/pipeline/evaluate_upper_arm.py` · `PN-QRS/pipeline/extract_quality_segments.py` · `PN-QRS/pipeline/wave_salience_calculator.py`
 
 ---
 
@@ -30,13 +30,13 @@ related: "[[PN_QRS_解读]]"
 cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
 
 # 基本用法（自动推断采样率）
-python apply_pnqrs.py --data_dir /path/to/xlsx
+python pipeline/apply_pnqrs.py --data_dir /path/to/xlsx
 
 # 手动指定采样率（推断不准时用）
-python apply_pnqrs.py --data_dir /path/to/xlsx --fs 500
+python pipeline/apply_pnqrs.py --data_dir /path/to/xlsx --fs 500
 
 # 指定 GPU
-python apply_pnqrs.py --data_dir /path/to/xlsx --gpu 1
+python pipeline/apply_pnqrs.py --data_dir /path/to/xlsx --gpu 1
 ```
 
 ---
@@ -57,18 +57,18 @@ python apply_pnqrs.py --data_dir /path/to/xlsx --gpu 1
 
 ## 可视化
 
-检测完成后用 `visualize_rpeaks.py` 画图验证，红点即为检测到的 R-peak：
+检测完成后用 `pipeline/visualize_rpeaks.py` 画图验证，红点即为检测到的 R-peak：
 
 ```bash
 cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
 
 # 显示全部通道，前 30 秒（默认）
-python visualize_rpeaks.py \
+python pipeline/visualize_rpeaks.py \
   --csv "data/recording.csv" \
   --fs  1000
 
 # 只看 CH20，从第 60 秒开始看 20 秒
-python visualize_rpeaks.py \
+python pipeline/visualize_rpeaks.py \
   --csv      "data/recording.csv" \
   --fs       1000 \
   --channels CH20 \
@@ -89,13 +89,62 @@ python visualize_rpeaks.py \
 
 ---
 
+### 低幅度区段分析（`--low_amp`）
+
+硬件信号不稳定时，可以用 `--batch --low_amp` 跨文件全局统计 CH20 信号幅度，
+并对比低/中/高幅度区段的 R-peak 检测质量。
+
+```bash
+# 批量 + 全局幅度分析（推荐，每组显示 9 个窗口）
+python pipeline/visualize_rpeaks.py \
+  --batch \
+  --data_dir data/0410_real/ \
+  --fs       1000 \
+  --low_amp \
+  --top_n    9
+```
+
+生成三张图：
+
+| 文件名 | 内容 |
+|--------|------|
+| `global_CH20_amp_distribution.png` | 所有 10 秒窗口的 CH20 峰峰值分布直方图（含 p25/p50 线） |
+| `global_CH20_amp_comparison.png` | Low / Mid / High 各 N 个窗口的对比图，每格含红点 R-peak 标注 |
+| `global_CH20_amp_vs_cvrr.png` | 幅度 vs CV_RR 散点图 + 线性回归，判断幅度与检测质量是否相关 |
+
+**子图标题格式：**
+
+```
+[Low#1] rec01.csv
+0.0-10.0s  ptp=0.0821  cv_rr=0.312  8beats
+```
+
+- `ptp`：峰峰值（peak-to-peak），即 `max(signal) - min(signal)`，反映信号幅度大小
+- `cv_rr`：RR 间期变异系数（`std(RR) / mean(RR)`），反映检测质量
+  - `< 0.10`：节律规律，检测可信
+  - `> 0.20`：节律混乱，低幅度信号上的漏检/误报
+
+**散点图（`global_CH20_amp_vs_cvrr.png`）怎么读：**
+
+- 横轴 = 幅度（ptp），纵轴 = CV_RR
+- 拟合斜率 < 0 且 p < 0.05 → 幅度越大检测质量越好，**正相关成立**
+- 斜率 ≈ 0 或 p ≥ 0.05 → 幅度大小对检测质量无显著影响
+
+| 参数 | 说明 | 默认 |
+|------|------|------|
+| `--win_sec` | 窗口时长（秒） | 10.0 |
+| `--top_n` | 每组显示窗口数 | 6 |
+| `--channels` | 分析的通道（batch+low_amp 模式默认 CH20） | CH20 |
+
+---
+
 ## 常见问题
 
 **CH20 漏检多**：上臂导联 QRS 可能倒置，在 `load_excel_ecg` 调用后尝试 `rec.ch_upper_arm = -rec.ch_upper_arm`，再对比检测数量。
 
 **采样率推断错误**：加 `--fs 250`（或设备实际采样率）手动指定。
 
-**检测数量极少（如 46 个可见 spike 只检出 4 个）**：信号单位是 ADC 计数（幅度 >>10）时，`preprocess_ecg` 内部的 `pp()` 函数会把整段信号抹平成常数，导致模型看不到任何波形。`apply_pnqrs.py` 已在进入 `preprocess_ecg` 前自动做 z-score 预处理规避此问题（`_run_window` 中 `std > 1` 时触发）。
+**检测数量极少（如 46 个可见 spike 只检出 4 个）**：信号单位是 ADC 计数（幅度 >>10）时，`preprocess_ecg` 内部的 `pp()` 函数会把整段信号抹平成常数，导致模型看不到任何波形。`pipeline/apply_pnqrs.py` 已在进入 `preprocess_ecg` 前自动做 z-score 预处理规避此问题（`_run_window` 中 `std > 1` 时触发）。
 
 **某导联 lead_usage_pct 始终为 0%**：U_E 机制已自动排除该导联，结果不受影响，但说明该导联可能脱落或极性错误。
 
@@ -135,19 +184,19 @@ mean_uc = mean(eu + au)  # 对所有帧取均值
 cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
 
 # 自动阈值（推荐，Otsu 方法自动分割好/坏窗口）
-python extract_quality_segments.py --csv /path/to/data.csv --fs 1000 --uc_thr auto
+python pipeline/extract_quality_segments.py --csv /path/to/data.csv --fs 1000 --uc_thr auto
 
 # 基本用法（不确定性阈值默认 1.0，临床 ECG 适用）
-python extract_quality_segments.py --csv /path/to/data.csv --fs 1000
+python pipeline/extract_quality_segments.py --csv /path/to/data.csv --fs 1000
 
 # 调严阈值：只保留最干净的片段（阈值越低越严格）
-python extract_quality_segments.py --csv /path/to/data.csv --fs 1000 --uc_thr 0.5
+python pipeline/extract_quality_segments.py --csv /path/to/data.csv --fs 1000 --uc_thr 0.5
 
 # 调宽阈值：尽量多保留片段（可穿戴数据推荐起点）
-python extract_quality_segments.py --csv /path/to/data.csv --fs 1000 --uc_thr 2.0
+python pipeline/extract_quality_segments.py --csv /path/to/data.csv --fs 1000 --uc_thr 2.0
 
 # 嘈杂数据：缩小滑动步长（默认 8s → 1s），密集扫描发现夹在噪声里的干净片段
-python extract_quality_segments.py --csv /path/to/data.csv --fs 1000 --uc_thr auto --step 1
+python pipeline/extract_quality_segments.py --csv /path/to/data.csv --fs 1000 --uc_thr auto --step 1
 ```
 
 ### 批量模式（`--batch`）
@@ -165,16 +214,16 @@ data_dir/
 cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
 
 # 递归扫描，按行为子目录自动分组
-python extract_quality_segments.py --batch --data_dir /path/to/data_dir --fs 1000
+python pipeline/extract_quality_segments.py --batch --data_dir /path/to/data_dir --fs 1000
 
 # 批量 + 自动阈值（两遍：先全量推理，汇总 Otsu 阈值，再统一过滤）
-python extract_quality_segments.py --batch --data_dir /path/to/data_dir --fs 1000 --uc_thr auto
+python pipeline/extract_quality_segments.py --batch --data_dir /path/to/data_dir --fs 1000 --uc_thr auto
 
 # 批量 + 手动阈值
-python extract_quality_segments.py --batch --data_dir /path/to/data_dir --fs 1000 --uc_thr 2.0
+python pipeline/extract_quality_segments.py --batch --data_dir /path/to/data_dir --fs 1000 --uc_thr 2.0
 
 # 嘈杂数据批量：密集滑动窗口（step=2s）+ 自动阈值
-python extract_quality_segments.py --batch --data_dir /path/to/data_dir --fs 1000 --uc_thr auto --step 2
+python pipeline/extract_quality_segments.py --batch --data_dir /path/to/data_dir --fs 1000 --uc_thr auto --step 2
 ```
 
 **终端输出示例（按行为分组，小计加粗）：**
@@ -235,7 +284,7 @@ TOTAL                           1742.0      218    151   69.3%
 
 `mean_uc` 只回答"QRS 找不找得到"，不回答"P 波 / T 波 / ST 段可不可见"。对于设备验证和需要完整 PQRST 形态的下游任务（如心梗检测），需要额外的形态学质量评估。
 
-`wave_salience_calculator.py` 基于 NeuroKit2 波形检测，计算每个波段（P/Q/S/T）相对于 R 波的**显著性分数**（salience）和**检出率**（detection rate），并以检出率为权重计算综合评分。
+`pipeline/wave_salience_calculator.py` 基于 NeuroKit2 波形检测，计算每个波段（P/Q/S/T）相对于 R 波的**显著性分数**（salience）和**检出率**（detection rate），并以检出率为权重计算综合评分。
 
 ### 快速开始
 
@@ -243,13 +292,13 @@ TOTAL                           1742.0      218    151   69.3%
 cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
 
 # 单文件分析
-python wave_salience_calculator.py --csv /path/to/data.csv --fs 1000
+python pipeline/wave_salience_calculator.py --csv /path/to/data.csv --fs 1000
 
 # 输出逐段明细
-python wave_salience_calculator.py --csv /path/to/data.csv --fs 1000 --detail
+python pipeline/wave_salience_calculator.py --csv /path/to/data.csv --fs 1000 --detail
 
 # 批量模式（按行为子目录分组）
-python wave_salience_calculator.py --batch --data_dir /path/to/data_dir --fs 1000
+python pipeline/wave_salience_calculator.py --batch --data_dir /path/to/data_dir --fs 1000
 ```
 
 ### 输出示例
@@ -320,13 +369,13 @@ SQICalculatorRole (ABC)
 
 ---
 
-## 波形显著性 SQI（domain 库版，wave_salience_calculator_call.py）
+## 波形显著性 SQI（domain 库版，pipeline/wave_salience_calculator_call.py）
 
-`wave_salience_calculator.py` 基于 NeuroKit2 自行实现波形检测。如果项目中已有 `_wave_salience_calculator.py`（domain SQI 库），可改用 `wave_salience_calculator_call.py` 作为调用层，它封装了相同的 P/Q/S/T/综合计算器接口，输出格式更结构化。
+`pipeline/wave_salience_calculator.py` 基于 NeuroKit2 自行实现波形检测。如果项目中已有 `_pipeline/wave_salience_calculator.py`（domain SQI 库），可改用 `pipeline/wave_salience_calculator_call.py` 作为调用层，它封装了相同的 P/Q/S/T/综合计算器接口，输出格式更结构化。
 
 ### 前置条件
 
-**必须先运行 `apply_pnqrs.py`**，生成 `*_CH20_rpeaks.csv`（或 `*_CH1-8_rpeaks.csv`）。`wave_salience_calculator_call.py` 直接读取这些文件，不重复做 R-peak 检测。
+**必须先运行 `pipeline/apply_pnqrs.py`**，生成 `*_CH20_rpeaks.csv`（或 `*_CH1-8_rpeaks.csv`）。`pipeline/wave_salience_calculator_call.py` 直接读取这些文件，不重复做 R-peak 检测。
 
 ### 快速开始
 
@@ -334,16 +383,16 @@ SQICalculatorRole (ABC)
 cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
 
 # 单文件
-python wave_salience_calculator_call.py --csv /path/to/data.csv --fs 1000
+python pipeline/wave_salience_calculator_call.py --csv /path/to/data.csv --fs 1000
 
 # 单文件 + 分波明细 CSV
-python wave_salience_calculator_call.py --csv /path/to/data.csv --fs 1000 --detail
+python pipeline/wave_salience_calculator_call.py --csv /path/to/data.csv --fs 1000 --detail
 
 # 批量（递归扫描子目录）
-python wave_salience_calculator_call.py --batch --data_dir /path/to/data_dir --fs 1000
+python pipeline/wave_salience_calculator_call.py --batch --data_dir /path/to/data_dir --fs 1000
 
 # 批量 + 明细 + 指定输出目录
-python wave_salience_calculator_call.py --batch --data_dir /path/to/data_dir --fs 1000 --detail --out_dir /path/to/out
+python pipeline/wave_salience_calculator_call.py --batch --data_dir /path/to/data_dir --fs 1000 --detail --out_dir /path/to/out
 ```
 
 ### 输出示例（终端）
@@ -381,12 +430,12 @@ rec01.csv                                 36.0   0.082  100.0%   0.241   81.3%  
 | `wave_sqi_summary_.csv` | 每个文件一行：`composite_value/score/conf` + `P/Q/S/T_value/confidence/score` |
 | `wave_sqi_detail_.csv` | 每波一行，含 `description` 字段（`--detail` 时生成）|
 
-### 与 wave_salience_calculator.py 的区别
+### 与 pipeline/wave_salience_calculator.py 的区别
 
-| 维度 | wave_salience_calculator.py | wave_salience_calculator_call.py |
+| 维度 | pipeline/wave_salience_calculator.py | pipeline/wave_salience_calculator_call.py |
 |------|----------------------------|---------------------------------|
-| 波形检测后端 | NeuroKit2（内置） | `_wave_salience_calculator.py`（domain 库）|
-| R-peak 来源 | 脚本内部重新检测 | 读取 `apply_pnqrs.py` 生成的 rpeaks CSV |
+| 波形检测后端 | NeuroKit2（内置） | `_pipeline/wave_salience_calculator.py`（domain 库）|
+| R-peak 来源 | 脚本内部重新检测 | 读取 `pipeline/apply_pnqrs.py` 生成的 rpeaks CSV |
 | 输出字段 | salience / detection_rate / composite | value / confidence / score / description |
 | 适用场景 | 独立使用，无外部依赖 | 已跑过 apply_pnqrs，需要接入 domain SQI 框架 |
 
@@ -399,8 +448,8 @@ rec01.csv                                 36.0   0.082  100.0%   0.241   81.3%  
 ```bash
 cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
 
-# 先运行 apply_pnqrs.py 生成 *_rpeaks.csv，再运行评估
-python evaluate_upper_arm.py --data_dir /path/to/data --fs 1000
+# 先运行 pipeline/apply_pnqrs.py 生成 *_rpeaks.csv，再运行评估
+python pipeline/evaluate_upper_arm.py --data_dir /path/to/data --fs 1000
 ```
 
 输出示例：
@@ -470,7 +519,7 @@ DATA="data/0410_real"
 ### 步骤 1：R-peak 检测
 
 ```bash
-$CONDA python apply_pnqrs.py --data_dir $DATA --fs 1000 --gpu 0
+$CONDA python pipeline/apply_pnqrs.py --data_dir $DATA --fs 1000 --gpu 0
 ```
 
 输出：每个 CSV 旁生成 `*_CH1-8_rpeaks.csv` 和 `*_CH20_rpeaks.csv`，根目录生成 `rpeaks_summary.json`。
@@ -479,7 +528,7 @@ $CONDA python apply_pnqrs.py --data_dir $DATA --fs 1000 --gpu 0
 
 ```bash
 # 对单个文件可视化（指定时间段）
-$CONDA python visualize_rpeaks.py \
+$CONDA python pipeline/visualize_rpeaks.py \
   --csv $DATA/被试1/坐姿抬手/rec01.csv \
   --fs 1000 --duration 20 \
   --out $DATA/被试1/坐姿抬手/rec01_rpeaks_vis.png
@@ -488,20 +537,20 @@ $CONDA python visualize_rpeaks.py \
 ### 步骤 3：不确定性质量分析
 
 ```bash
-$CONDA python extract_quality_segments.py \
+$CONDA python pipeline/extract_quality_segments.py \
   --batch --data_dir $DATA --fs 1000 --uc_thr auto --gpu 0
 ```
 
 ### 步骤 4：上臂导联评估
 
 ```bash
-$CONDA python evaluate_upper_arm.py --data_dir $DATA --fs 1000
+$CONDA python pipeline/evaluate_upper_arm.py --data_dir $DATA --fs 1000
 ```
 
 ### 步骤 5：波形显著性 SQI
 
 ```bash
-$CONDA python wave_salience_calculator.py --batch --data_dir $DATA --fs 1000
+$CONDA python pipeline/wave_salience_calculator.py --batch --data_dir $DATA --fs 1000
 ```
 
 ### 结果汇总
