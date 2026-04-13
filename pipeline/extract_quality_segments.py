@@ -259,6 +259,15 @@ def plot_overview(signal, windows, fs, uc_thr, out_path):
     # ── ECG 信号 ─────────────────────────────────
     ax_ecg.plot(t, signal, lw=0.35, color="steelblue", alpha=0.85, rasterized=True)
 
+    # R-peak 红点（汇集所有窗口的 r_peaks_abs，去重）
+    all_rp = np.unique(np.concatenate([
+        w["r_peaks_abs"] for w in windows if len(w.get("r_peaks_abs", [])) > 0
+    ])) if windows else np.array([], dtype=int)
+    valid_rp = all_rp[(all_rp >= 0) & (all_rp < len(signal))]
+    if len(valid_rp):
+        ax_ecg.scatter(valid_rp / fs, signal[valid_rp],
+                       color="red", s=8, zorder=5, linewidths=0, alpha=0.7)
+
     # 连续区段着色（无论窗口多密集都只画有限个矩形）
     for s, e in _coverage_spans(len(signal), windows, good=True):
         ax_ecg.axvspan(s / fs, e / fs, alpha=0.18, color=COLOR_GOOD, lw=0)
