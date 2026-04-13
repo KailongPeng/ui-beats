@@ -135,11 +135,21 @@ def run_inference(signal: np.ndarray, fs: int, model, device,
 
     pos = 0
     while pos < sig_len:
-        actual_end = min(pos + ws, sig_len)
-        w = signal[pos: pos + ws]
-        w = np.pad(w, (0, max(0, ws - len(w))))
+        is_tail = (pos + ws > sig_len)
+        if is_tail and sig_len >= ws:
+            # 用信号末尾对齐的窗口替代零填充尾巴窗口：
+            # 零填充会让模型看到半段平坦信号，导致不确定性飙高 → 永远是红色。
+            # 直接把起点移到 sig_len - ws，保证整窗都是真实信号。
+            win_start = sig_len - ws
+        else:
+            win_start = pos
+        actual_end = min(win_start + ws, sig_len)
+        w = signal[win_start: win_start + ws]
+        w = np.pad(w, (0, max(0, ws - len(w))))   # 仅 sig_len < ws 时会触发
         tensor_list.append(_preprocess_window(w, fs))
-        meta_list.append((pos, actual_end))
+        meta_list.append((win_start, actual_end))
+        if is_tail:
+            break   # 尾窗处理完即停，避免无限循环
         pos += ss
 
     if not tensor_list:
