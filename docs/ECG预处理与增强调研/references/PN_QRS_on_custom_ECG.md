@@ -286,9 +286,9 @@ bash pipeline/run_pipeline.sh \
   --top_n    9 \
   --uc_thr   auto
 
-# 跳过已完成的步骤（如 Step 1 已跑过）
+# 跳过已完成的步骤（逗号分隔，如只重跑 Step 3）
 bash pipeline/run_pipeline.sh \
-  --data_dir data/0413_real/ --fs 1000 --skip 1
+  --data_dir data/0413_real/ --fs 1000 --skip 1,2,4,5
 ```
 
 每步完成后打印耗时，任意一步报错自动停止。
