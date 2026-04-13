@@ -273,6 +273,30 @@ python pipeline/wave_salience_calculator_call.py \
 
 ```bash
 cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
+
+# 一键跑完全部 5 步
+bash pipeline/run_pipeline.sh --data_dir data/0413_real/ --fs 1000
+
+# 常用参数
+bash pipeline/run_pipeline.sh \
+  --data_dir data/0413_real/ \
+  --fs       1000 \
+  --gpu      0 \
+  --conda_env ECGFounder \
+  --top_n    9 \
+  --uc_thr   auto
+
+# 跳过已完成的步骤（如 Step 1 已跑过）
+bash pipeline/run_pipeline.sh \
+  --data_dir data/0413_real/ --fs 1000 --skip 1
+```
+
+每步完成后打印耗时，任意一步报错自动停止。
+
+### 手动逐步运行
+
+```bash
+cd /home/kailong/ECG/ECG/ECGFounder/PN-QRS
 CONDA="conda run -n ECGFounder"
 DATA="data/0410_real"
 
