@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-PNQRS_ROOT = Path(__file__).parent
+PNQRS_ROOT = Path(__file__).parent.parent   # pipeline/ -> PN-QRS root
 CKPT_PATH  = PNQRS_ROOT / "experiments/logs_real/zy2lki18/models/best_model.pt"
 sys.path.insert(0, str(PNQRS_ROOT))
 
