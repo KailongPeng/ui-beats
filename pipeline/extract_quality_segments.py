@@ -321,11 +321,14 @@ def plot_overview(signal, windows, fs, uc_thr, out_path):
                            color=COLOR_BAD,  alpha=0.45, lw=0, label="low-quality")
         ax_uc.plot(t[valid], uc_map[valid], lw=0.6, color="steelblue", alpha=0.7)
     else:
-        # 柱状图（稀疏窗口时更直观）：用窗口中心，bar 居中符合习惯
-        xs     = np.array([(w["start_s"] + w["end_s"]) / 2 for w in windows])
-        bar_w  = step_sec * 0.75
+        # 柱状图（稀疏窗口时更直观）：左对齐到 start_s，宽度固定 step_sec×0.9
+        # 用中心对齐时，尾窗（不足一整窗）的中心偏左，导致它永远和倒数第二个柱子重叠。
+        # 左对齐 + 固定宽度 = 相邻柱间距恒为 step_sec×0.1，不受尾窗长度影响。
+        xs     = np.array([w["start_s"] for w in windows])
+        bar_w  = step_sec * 0.9
         colors = [COLOR_GOOD if w["is_good"] else COLOR_BAD for w in windows]
-        ax_uc.bar(xs, ucs, width=bar_w, color=colors, alpha=0.75, edgecolor="none")
+        ax_uc.bar(xs, ucs, width=bar_w, align="edge",
+                  color=colors, alpha=0.75, edgecolor="none")
 
     ax_uc.axhline(uc_thr, color="gray", lw=1.0, linestyle="--",
                   label=f"threshold {uc_thr:.3f}")
