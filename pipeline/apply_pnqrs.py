@@ -100,7 +100,7 @@ def load_excel_ecg(path: str, fs_override: Optional[int] = None) -> ECGRecord:
 
 
 def load_model(device) -> QRSModel:
-    ckpt  = torch.load(str(CKPT_PATH), map_location="cpu")
+    ckpt  = torch.load(str(CKPT_PATH), map_location="cpu", weights_only=False)
     model = QRSModel(encoder4qrs(), decoder4qrs(), phi_qrs()).to(device)
     model.load_state_dict(ckpt["model_state"])
     return model.eval()
