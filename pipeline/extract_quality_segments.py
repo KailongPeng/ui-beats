@@ -134,12 +134,10 @@ def run_inference(signal: np.ndarray, fs: int, model, device,
     tensor_list = []   # list of (1, T_50hz) float32
 
     pos = 0
-    while pos < sig_len:
-        actual_end = min(pos + ws, sig_len)
+    while pos + ws <= sig_len:   # 不足一整窗的尾巴直接跳过，不推理不画 bar
         w = signal[pos: pos + ws]
-        w = np.pad(w, (0, max(0, ws - len(w))))
         tensor_list.append(_preprocess_window(w, fs))
-        meta_list.append((pos, actual_end))
+        meta_list.append((pos, pos + ws))
         pos += ss
 
     if not tensor_list:
@@ -181,14 +179,7 @@ def run_inference(signal: np.ndarray, fs: int, model, device,
 def apply_threshold(windows: list, uc_thr: float) -> list:
     """根据阈值设置每个窗口的 is_good。"""
     for w in windows:
-        # 按实际窗口时长等比缩放心拍范围：
-        # BEAT_MIN/MAX 是为完整 WIN_SEC=10s 设计的，尾窗更短时若不缩放，
-        # 会因为心拍数绝对值偏少而误判为红色（即便 mean_uc 已低于阈值）。
-        actual_sec = w["end_s"] - w["start_s"]
-        ratio      = actual_sec / WIN_SEC
-        beat_min   = max(1, BEAT_MIN * ratio)
-        beat_max   = BEAT_MAX * ratio
-        w["is_good"] = (w["mean_uc"] <= uc_thr) and (beat_min <= w["n_beats"] <= beat_max)
+        w["is_good"] = (w["mean_uc"] <= uc_thr) and (BEAT_MIN <= w["n_beats"] <= BEAT_MAX)
     return windows
 
 
