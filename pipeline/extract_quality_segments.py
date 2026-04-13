@@ -181,7 +181,14 @@ def run_inference(signal: np.ndarray, fs: int, model, device,
 def apply_threshold(windows: list, uc_thr: float) -> list:
     """根据阈值设置每个窗口的 is_good。"""
     for w in windows:
-        w["is_good"] = (w["mean_uc"] <= uc_thr) and (BEAT_MIN <= w["n_beats"] <= BEAT_MAX)
+        # 按实际窗口时长等比缩放心拍范围：
+        # BEAT_MIN/MAX 是为完整 WIN_SEC=10s 设计的，尾窗更短时若不缩放，
+        # 会因为心拍数绝对值偏少而误判为红色（即便 mean_uc 已低于阈值）。
+        actual_sec = w["end_s"] - w["start_s"]
+        ratio      = actual_sec / WIN_SEC
+        beat_min   = max(1, BEAT_MIN * ratio)
+        beat_max   = BEAT_MAX * ratio
+        w["is_good"] = (w["mean_uc"] <= uc_thr) and (beat_min <= w["n_beats"] <= beat_max)
     return windows
 
 
