@@ -14,6 +14,7 @@ apply_pnqrs.py -- 对自采 Excel ECG 文件批量检测 R-peak
 import argparse
 import glob
 import json
+import multiprocessing as mp
 import os
 import sys
 from dataclasses import dataclass, field
@@ -23,6 +24,10 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import torch
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = None
 
 PNQRS_ROOT = Path(__file__).parent.parent   # pipeline/ -> PN-QRS root
 CKPT_PATH  = PNQRS_ROOT / "experiments/logs_real/zy2lki18/models/best_model.pt"
@@ -246,34 +251,73 @@ def process_file(path: str, model, device, fs_override=None) -> dict:
     return result
 
 
+SKIP_SUFFIXES = ("_rpeaks.csv", "_quality_report.csv",
+                 "_wave_sqi.csv", "_wave_sqi_detail.csv",
+                 "rpeaks_summary.json")
+
+
+def _find_files(data_dir: str):
+    files = sorted(
+        glob.glob(os.path.join(data_dir, "**", "*.xlsx"), recursive=True) +
+        glob.glob(os.path.join(data_dir, "**", "*.csv"),  recursive=True)
+    )
+    return [f for f in files if not any(f.endswith(s) for s in SKIP_SUFFIXES)]
+
+
+def _worker(gpu_id: int, files: list, fs_override):
+    """子进程入口（spawn 模式，必须是顶层函数）。"""
+    device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
+    model  = load_model(device)
+    results = []
+    it = tqdm(files, desc=f"GPU{gpu_id}", position=gpu_id, leave=True) \
+         if tqdm else files
+    for f in it:
+        if tqdm is None:
+            print(f"  [GPU{gpu_id}] {os.path.basename(f)}", flush=True)
+        results.append(process_file(f, model, device, fs_override))
+    return results
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", required=True)
-    ap.add_argument("--gpu",  default="0")
-    ap.add_argument("--fs",   default=None, type=int, help="手动指定采样率")
+    ap.add_argument("--gpu", default="0",
+                    help="GPU 编号；多卡用逗号分隔，如 0,1,2")
+    ap.add_argument("--fs",  default=None, type=int, help="手动指定采样率")
     args = ap.parse_args()
 
-    device = torch.device(f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu")
-    model  = load_model(device)
-    print(f"模型就绪，设备: {device}\n{'─'*50}")
+    gpu_ids = [int(g.strip()) for g in args.gpu.split(",")]
+    n_gpus  = len(gpu_ids)
 
-    files = sorted(
-        glob.glob(os.path.join(args.data_dir, "**", "*.xlsx"), recursive=True) +
-        glob.glob(os.path.join(args.data_dir, "**", "*.csv"),  recursive=True)
-    )
-    # 跳过脚本自身生成的结果文件
-    files = [f for f in files if not any(
-        f.endswith(s) for s in ("_rpeaks.csv", "_quality_report.csv",
-                                "_wave_sqi.csv", "_wave_sqi_detail.csv",
-                                "rpeaks_summary.json")
-    )]
-    print(f"找到 {len(files)} 个文件\n")
+    files = _find_files(args.data_dir)
+    print(f"找到 {len(files)} 个文件，使用 {n_gpus} 张 GPU: {gpu_ids}\n")
 
-    all_results = []
-    n = len(files)
-    for i, f in enumerate(files, 1):
-        print(f"\n[{i}/{n}] >> {os.path.basename(f)}", flush=True)
-        all_results.append(process_file(f, model, device, args.fs))
+    if n_gpus == 1 or not torch.cuda.is_available():
+        # ── 单卡（原始行为）─────────────────────────────
+        device = torch.device(f"cuda:{gpu_ids[0]}" if torch.cuda.is_available() else "cpu")
+        model  = load_model(device)
+        print(f"模型就绪，设备: {device}\n{'─'*50}")
+        it = tqdm(enumerate(files, 1), total=len(files), desc="Step1") \
+             if tqdm else enumerate(files, 1)
+        all_results = []
+        for i, f in it:
+            if tqdm is None:
+                print(f"\n[{i}/{len(files)}] >> {os.path.basename(f)}", flush=True)
+            all_results.append(process_file(f, model, device, args.fs))
+    else:
+        # ── 多卡：文件平均分配到各 GPU，每 GPU 一个子进程 ──
+        chunks = [files[i::n_gpus] for i in range(n_gpus)]
+        ctx    = mp.get_context("spawn")   # CUDA 必须用 spawn，不能 fork
+        worker_args = [(gpu_id, chunk, args.fs)
+                       for gpu_id, chunk in zip(gpu_ids, chunks) if chunk]
+        with ctx.Pool(len(worker_args)) as pool:
+            results_per_gpu = pool.starmap(_worker, worker_args)
+        # 按原始文件顺序合并
+        file_to_result = {r["file"]: r
+                          for gpu_results in results_per_gpu
+                          for r in gpu_results}
+        all_results = [file_to_result[os.path.basename(f)]
+                       for f in files if os.path.basename(f) in file_to_result]
 
     summary = os.path.join(args.data_dir, "rpeaks_summary.json")
     with open(summary, "w", encoding="utf-8") as fp:
