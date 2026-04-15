@@ -200,22 +200,36 @@ def assess_quality(signal: np.ndarray, fs: int, model, device,
 # 保存高质量片段 (NPZ)
 # ──────────────────────────────────────────────
 
-def save_segments(signal, windows, fs, out_dir, base_name):
-    """高质量片段各存一个 NPZ 文件。"""
+def save_segments(signal, windows, fs, out_dir, base_name, df=None):
+    """高质量片段各存一个 NPZ 文件，包含 CH20 及可用的 CH1-CH8。"""
     os.makedirs(out_dir, exist_ok=True)
+
+    # 找出 df 中存在的标准导联列（CH1~CH8），按编号排序
+    std_cols = []
+    if df is not None:
+        std_cols = sorted(
+            [c for c in df.columns if str(c).upper() in {f"CH{i}" for i in range(1, 9)}],
+            key=lambda c: int(str(c)[2:])
+        )
+
     good = [w for w in windows if w["is_good"]]
     for i, w in enumerate(good):
-        seg   = signal[w["start_samp"]: w["end_samp"]]
+        s, e  = w["start_samp"], w["end_samp"]
         fname = f"{base_name}_seg{i:03d}_{int(w['start_s'])}s.npz"
-        np.savez(
-            os.path.join(out_dir, fname),
-            signal  = seg,
-            fs      = np.array(fs),
-            start_s = np.array(w["start_s"]),
-            mean_uc = np.array(w["mean_uc"]),
-            n_beats = np.array(w["n_beats"]),
-            r_peaks = w["r_peaks_abs"] - w["start_samp"],   # 相对于片段起点
-        )
+
+        arrays = {
+            "CH20":    signal[s:e],                          # 上臂导联
+            "fs":      np.array(fs),
+            "start_s": np.array(w["start_s"]),
+            "mean_uc": np.array(w["mean_uc"]),
+            "n_beats": np.array(w["n_beats"]),
+            "r_peaks": w["r_peaks_abs"] - s,                 # 相对于片段起点
+        }
+        # 加入标准导联（若有）
+        for col in std_cols:
+            arrays[str(col).upper()] = df[col].values[s:e].astype(np.float32)
+
+        np.savez(os.path.join(out_dir, fname), **arrays)
     return good
 
 
@@ -508,7 +522,7 @@ def process_one_file(csv_path: str, fs: int, model, device,
     precomputed_windows: 批量 auto 模式下已推理好的 windows，直接复用。
     返回统计 dict 或 None（跳过）。
     """
-    signal, _ = load_signal(csv_path)
+    signal, df = load_signal(csv_path)
     if signal is None:
         print(f"  [跳过] 未找到 CH20 列：{csv_path}")
         return None
@@ -527,7 +541,7 @@ def process_one_file(csv_path: str, fs: int, model, device,
         windows = assess_quality(signal, fs, model, device, uc_thr, infer_batch, step_sec)
     n_good       = sum(w["is_good"] for w in windows)
     n_total      = len(windows)
-    good_windows = save_segments(signal, windows, fs, seg_dir, base_name)
+    good_windows = save_segments(signal, windows, fs, seg_dir, base_name, df=df)
 
     # 统计指标
     good_ucs   = [w["mean_uc"] for w in windows if w["is_good"]]
