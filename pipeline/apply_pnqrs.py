@@ -267,13 +267,13 @@ def _find_files(data_dir: str):
 def _worker(gpu_id: int, files: list, fs_override):
     """子进程入口（spawn 模式，必须是顶层函数）。"""
     device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
+    print(f"[GPU{gpu_id}] 加载模型…", flush=True)
     model  = load_model(device)
+    print(f"[GPU{gpu_id}] 模型就绪，处理 {len(files)} 个文件", flush=True)
     results = []
-    it = tqdm(files, desc=f"GPU{gpu_id}", position=gpu_id, leave=True) \
-         if tqdm else files
-    for f in it:
-        if tqdm is None:
-            print(f"  [GPU{gpu_id}] {os.path.basename(f)}", flush=True)
+    n = len(files)
+    for i, f in enumerate(files, 1):
+        print(f"[GPU{gpu_id}] [{i}/{n}] {os.path.basename(f)}", flush=True)
         results.append(process_file(f, model, device, fs_override))
     return results
 
@@ -295,14 +295,13 @@ def main():
     if n_gpus == 1 or not torch.cuda.is_available():
         # ── 单卡（原始行为）─────────────────────────────
         device = torch.device(f"cuda:{gpu_ids[0]}" if torch.cuda.is_available() else "cpu")
+        print(f"加载模型到 {device} …", flush=True)
         model  = load_model(device)
-        print(f"模型就绪，设备: {device}\n{'─'*50}")
-        it = tqdm(enumerate(files, 1), total=len(files), desc="Step1") \
-             if tqdm else enumerate(files, 1)
+        print(f"模型就绪\n{'─'*50}", flush=True)
         all_results = []
-        for i, f in it:
-            if tqdm is None:
-                print(f"\n[{i}/{len(files)}] >> {os.path.basename(f)}", flush=True)
+        n = len(files)
+        for i, f in enumerate(files, 1):
+            print(f"\n[{i}/{n}] {os.path.basename(f)}", flush=True)
             all_results.append(process_file(f, model, device, args.fs))
     else:
         # ── 多卡：文件平均分配到各 GPU，每 GPU 一个子进程 ──

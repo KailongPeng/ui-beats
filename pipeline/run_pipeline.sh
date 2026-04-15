@@ -79,7 +79,7 @@ if should_skip 1; then
 else
     step_banner 1 "R-peak detection  (apply_pnqrs.py)"
     T0=$(date +%s)
-    $CONDA python pipeline/apply_pnqrs.py \
+    $CONDA python -u pipeline/apply_pnqrs.py \
         --data_dir "$DATA_DIR" --fs "$FS" --gpu "$GPU"
     echo "  done in $(($(date +%s) - T0))s"
 fi
@@ -102,7 +102,7 @@ if should_skip 3; then
 else
     step_banner 3 "Quality segmentation  (extract_quality_segments.py)"
     T0=$(date +%s)
-    $CONDA python pipeline/extract_quality_segments.py \
+    $CONDA python -u pipeline/extract_quality_segments.py \
         --batch --data_dir "$DATA_DIR" --fs "$FS" \
         --uc_thr "$UC_THR" --gpu "$GPU"
     echo "  done in $(($(date +%s) - T0))s"
