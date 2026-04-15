@@ -130,6 +130,17 @@ else
     echo "  done in $(($(date +%s) - T0))s"
 fi
 
+# ── Step 6：质量评估方法对比（需同时有 CH1-8 和 CH20 数据）──────────────────────
+if should_skip 6; then
+    echo "  [skip] Step 6"
+else
+    step_banner 6 "Quality method comparison  (evaluate_quality_methods.py)"
+    T0=$(date +%s)
+    python eval/evaluate_quality_methods.py \
+        --data_dir "$DATA_DIR" --fs "$FS"
+    echo "  done in $(($(date +%s) - T0))s"
+fi
+
 # ── 完成 ─────────────────────────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

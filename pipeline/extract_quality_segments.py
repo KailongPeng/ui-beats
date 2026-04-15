@@ -37,7 +37,7 @@ sys.path.insert(0, str(PNQRS_ROOT))
 from dataset.dataset import preprocess_ecg
 from models.multi_head import decoder4qrs, encoder4qrs, phi_qrs
 from models.qrs_model import QRSModel
-from utils.qrs_post_process import correct, uncertain_est
+from utils.qrs_post_process import correct, uncertain_est, mi_est, en_est
 
 FS_MODEL      = 50
 WIN_SEC       = 10
@@ -157,7 +157,9 @@ def run_inference(signal: np.ndarray, fs: int, model, device,
     # ── 阶段 3：CPU 后处理（uncertain_est + correct）─
     windows = []
     for (pos, actual_end), logits_i in zip(meta_list, all_logits):
-        uc     = uncertain_est(logits_i)
+        uc     = uncertain_est(logits_i)   # clamped U_E + U_A
+        au     = en_est(logits_i)          # raw U_A (aleatoric)
+        eu     = mi_est(logits_i)          # raw U_E (epistemic, before clamping)
         r_50hz = correct(logits_i[0], uc)
         r_orig = np.round(np.array(r_50hz) * (fs / FS_MODEL)).astype(int)
         r_rel  = r_orig[r_orig < (actual_end - pos)]
@@ -169,6 +171,8 @@ def run_inference(signal: np.ndarray, fs: int, model, device,
             end_s       = actual_end / fs,
             n_beats     = len(r_rel),
             mean_uc     = round(float(np.mean(uc)), 4),
+            mean_ue     = round(float(np.mean(eu)), 4),   # 论文 Stage-1 指标
+            mean_ua     = round(float(np.mean(au)), 4),   # 论文 Stage-2 指标
             is_good     = False,
             r_peaks_abs = r_rel + pos,
         ))
