@@ -623,7 +623,8 @@ def main():
     if not args.batch and args.csv is None:
         ap.error("单文件模式需要指定 --csv")
 
-    device = torch.device(f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu")
+    gpu_id = int(str(args.gpu).split(",")[0])   # 支持 "5,6,7" 格式，取第一个
+    device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
     print(f"加载模型... 设备: {device}")
     model = load_model(device)
 
