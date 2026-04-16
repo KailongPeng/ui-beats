@@ -29,11 +29,17 @@ related: "[[PN_QRS_解读]]"
   ▼ Step 4  evaluate_upper_arm.py       → CH20 vs CH1-8 精度评估
   │
   ▼ Step 5  wave_salience_calculator.py → P/Q/S/T 波形显著性 SQI
-  │
-  ▼ Step 6  finetune/run_finetune.sh    → 在自采数据上微调模型（LOSO，可选）
 ```
 
-Step 1–5 的脚本在 `pipeline/` 下；Step 6 在 `finetune/` 下。均从仓库根目录运行。
+以上 5 步通过 `bash pipeline/run_pipeline.sh` 一键运行（`--skip` 可跳过指定步骤）。
+
+```
+（可选，独立运行）
+  finetune/run_finetune.sh  → 在自采数据上微调模型（LOSO）
+                              注意：与 run_pipeline.sh 无关，需单独执行
+```
+
+Step 1–5 的脚本在 `pipeline/` 下；微调脚本在 `finetune/` 下。均从仓库根目录运行。
 
 ---
 
@@ -360,9 +366,11 @@ python pipeline/wave_salience_calculator.py --batch --data_dir $DATA --fs 1000
 
 ---
 
-## Step 6：在自采数据上微调（可选）
+## 可选：在自采数据上微调
 
 > **前置条件**：Step 1 的 `*_CH1-8_rpeaks.csv` 和 Step 3 的 `*_quality_report.csv` 已生成。
+>
+> **注意**：微调脚本（`finetune/`）与 `run_pipeline.sh` 完全独立，需单独执行，不能通过 `--skip` 控制。
 
 模型默认权重来自 CPSC2019（标准 12 导联）。如果 CH20 检测质量不理想（F1 < 90%），可用 Step 1 产生的 12 导联伪标签对模型做 AEU 微调，让它专门适配上臂导联。
 
