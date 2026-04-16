@@ -132,8 +132,11 @@ def collect_windows(data_dir: str, fs: int) -> pd.DataFrame:
             print(f"  [跳过] {os.path.basename(base)}（缺少 rpeaks CSV）")
             continue
 
+        if os.path.getsize(qr_path) == 0:
+            print(f"  [跳过] {os.path.basename(base)}（quality_report 为空文件）")
+            continue
         qr = pd.read_csv(qr_path)
-        if not {"mean_ue", "mean_ua", "start_s", "end_s", "mean_uc"}.issubset(qr.columns):
+        if qr.empty or not {"mean_ue", "mean_ua", "start_s", "end_s", "mean_uc"}.issubset(qr.columns):
             print(f"  [跳过] {os.path.basename(base)}（quality_report 缺少 mean_ue/mean_ua，"
                   f"请重新运行 Step 3）")
             continue
