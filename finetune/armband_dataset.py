@@ -54,30 +54,36 @@ def _read_csv_robust(path: Path) -> pd.DataFrame:
 
 def scan_records(data_dir: Path, subjects: Optional[List[str]] = None) -> List[dict]:
     """
-    扫描 <data_dir>/<subject>/<activity>/rec*.csv，返回 record 描述列表。
+    扫描数据目录，支持两种目录结构：
+      3 级：<data_dir>/<subject>/<activity>/<file>.csv
+      2 级：<data_dir>/<subject>/<file>.csv   （无 activity 子目录，activity 设为 "default"）
 
-    每个 record 是一个原始 CSV 文件（例如 rec01.csv），聚合了路径信息。
     subjects=None 表示所有被试；否则只保留指定被试目录名。
     """
     data_dir = Path(data_dir).resolve()
     records: List[dict] = []
 
-    for csv_path in sorted(data_dir.glob("*/*/*.csv")):
+    skip_suffixes = (
+        "_quality_report.csv", "_CH1-8_rpeaks.csv", "_CH20_rpeaks.csv",
+        "_wave_sqi.csv",
+    )
+    skip_names = {"batch_quality_summary.csv", "batch_wave_sqi_summary.csv"}
+
+    for csv_path in sorted(data_dir.glob("**/*.csv")):
         name = csv_path.name
-        # 跳过脚本产生的辅助 CSV
-        skip_suffixes = (
-            "_quality_report.csv", "_CH1-8_rpeaks.csv", "_CH20_rpeaks.csv",
-            "_wave_sqi.csv",
-        )
-        if any(name.endswith(s) for s in skip_suffixes):
-            continue
-        if name in {"batch_quality_summary.csv", "batch_wave_sqi_summary.csv"}:
+        if any(name.endswith(s) for s in skip_suffixes) or name in skip_names:
             continue
 
         rel_parts = csv_path.relative_to(data_dir).parts
-        if len(rel_parts) < 3:
-            continue
-        subject, activity = rel_parts[0], rel_parts[1]
+        if len(rel_parts) == 2:
+            # <subject>/<file>.csv — 无 activity 子目录
+            subject, activity = rel_parts[0], "default"
+        elif len(rel_parts) == 3:
+            # <subject>/<activity>/<file>.csv
+            subject, activity = rel_parts[0], rel_parts[1]
+        else:
+            continue  # 更深层路径（如 quality_segments/）跳过
+
         if subjects is not None and subject not in subjects:
             continue
 
