@@ -33,6 +33,12 @@ related: "[[PN_QRS_解读]]"
 
 所有脚本在 `PN-QRS/pipeline/` 下，从 `PN-QRS/` 根目录运行。
 
+可选的后续步骤：
+
+```
+  ▼ Step 6  finetune/run_finetune.sh  → 在自己的数据上微调模型（LOSO）
+```
+
 ---
 
 ## 数据格式
@@ -355,6 +361,68 @@ python pipeline/wave_salience_calculator.py --batch --data_dir $DATA --fs 1000
 | P 波 | ~100% | salience 0.07–0.60，活动依赖 |
 | T 波 | ~77% | 运动伪迹下下降符合预期 |
 | composite SQI | 0.31 | 在上臂导联参考范围内 |
+
+---
+
+## Step 6：在自采数据上微调（可选）
+
+> **前置条件**：Step 1 的 `*_CH1-8_rpeaks.csv` 和 Step 3 的 `*_quality_report.csv` 已生成。
+
+模型默认权重来自 CPSC2019（标准 12 导联）。如果 CH20 检测质量不理想（F1 < 90%），可用 Step 1 产生的 12 导联伪标签对模型做 AEU 微调，让它专门适配上臂导联。
+
+### 一键 LOSO 微调 + 评估
+
+```bash
+cd /home/kailong/ECG/ECG/UI_Beat
+bash finetune/run_finetune.sh --data_dir data/0410_real --fs 1000 --gpu 0
+```
+
+- 对 `data_dir` 下每个被试目录分别做一次 LOSO fold（用其他被试训练，当前被试验证）
+- 每 fold 自动跑完训练 + 评估，结果写入 `experiments/logs_armband/`
+
+### 手动单 fold
+
+```bash
+# 训练
+conda run -n ECGFounder python finetune/train_armband.py \
+    --data_dir data/0410_real --fs 1000 \
+    --test_subject subject01 --gpu 0
+
+# 评估（baseline vs fine-tuned）
+conda run -n ECGFounder python finetune/eval_armband.py \
+    --data_dir data/0410_real --fs 1000 \
+    --test_subject subject01 \
+    --baseline_ckpt  experiments/logs_real/zy2lki18/models/best_model.pt \
+    --finetuned_ckpt experiments/logs_armband/<timestamp>_subject01/models/best_model.pt \
+    --gpu 0
+```
+
+### 输出
+
+```
+experiments/logs_armband/<timestamp>_<subject>/
+├── models/
+│   ├── best_model.pt       ← 微调后权重（可替换 best_model.pt 用于 pipeline）
+│   └── last_model.pt
+├── history.csv             ← 每 epoch 的 α/θ loss + val_bce
+├── args.json
+└── eval/
+    ├── eval_results.csv    ← 每文件 Se/P+/F1（baseline + fine-tuned）
+    └── eval_summary.md     ← 按活动分组的 F1 对比表（含 Δ）
+```
+
+### 关键参数
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `--epochs` | 30 | 最大训练轮数（early stop 默认 patience=10）|
+| `--alpha_lr` | 5e-5 | encoder+decoder 学习率（保守，避免覆盖预训练特征）|
+| `--theta_lr` | 5e-5 | projection head 学习率 |
+| `--early_stop` | 10 | val_bce 不下降多少 epoch 后停止 |
+
+> **注意**：评估所用的参考标签是 PN-QRS 自己产出的 12 导联伪标签，不是人工标注。  
+> F1 提升 = 模型更好地在 CH20 上模仿 12 导联教师，不等同于绝对精度提升。  
+> 详见 `finetune/README.md`。
 
 ---
 
