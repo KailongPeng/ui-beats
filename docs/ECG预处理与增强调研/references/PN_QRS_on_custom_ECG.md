@@ -20,24 +20,20 @@ related: "[[PN_QRS_解读]]"
 ```
 原始 CSV
   │
-  ▼ Step 1  apply_pnqrs.py          → R-peak 检测（*_rpeaks.csv）
+  ▼ Step 1  apply_pnqrs.py              → R-peak 检测（*_rpeaks.csv）
   │
-  ▼ Step 2  visualize_rpeaks.py     → 可视化验证 + 幅度-质量分析
+  ▼ Step 2  visualize_rpeaks.py         → 可视化验证 + 幅度-质量分析
   │
   ▼ Step 3  extract_quality_segments.py → 基于不确定性筛选高质量片段
   │
-  ▼ Step 4  evaluate_upper_arm.py   → CH20 vs CH1-8 精度评估
+  ▼ Step 4  evaluate_upper_arm.py       → CH20 vs CH1-8 精度评估
   │
   ▼ Step 5  wave_salience_calculator.py → P/Q/S/T 波形显著性 SQI
+  │
+  ▼ Step 6  finetune/run_finetune.sh    → 在自采数据上微调模型（LOSO，可选）
 ```
 
-所有脚本在 `PN-QRS/pipeline/` 下，从 `PN-QRS/` 根目录运行。
-
-可选的后续步骤：
-
-```
-  ▼ Step 6  finetune/run_finetune.sh  → 在自己的数据上微调模型（LOSO）
-```
+Step 1–5 的脚本在 `pipeline/` 下；Step 6 在 `finetune/` 下。均从仓库根目录运行。
 
 ---
 
