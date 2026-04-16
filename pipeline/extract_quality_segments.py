@@ -533,6 +533,14 @@ def process_one_file(csv_path: str, fs: int, model, device,
     seg_dir    = out_dir or os.path.join(file_dir, "quality_segments")
     duration_s = len(signal) / fs
 
+    if duration_s < WIN_SEC:
+        print(f"  [跳过] 时长 {duration_s:.1f}s < {WIN_SEC}s（最小窗口长度）：{os.path.basename(csv_path)}")
+        qr_path = os.path.join(file_dir, base_name + "_quality_report.csv")
+        _REPORT_COLS = ["start_samp", "end_samp", "start_s", "end_s",
+                        "n_beats", "mean_uc", "mean_ue", "mean_ua", "is_good"]
+        pd.DataFrame(columns=_REPORT_COLS).to_csv(qr_path, index=False)
+        return None
+
     print(f"\n>> {csv_path}")
     print(f"   fs={fs}Hz  duration={duration_s:.1f}s  uc_thr={uc_thr:.3f}")
 
@@ -606,6 +614,9 @@ def _worker_infer(gpu_id, files, fs, infer_batch, step_sec):
         signal, _ = load_signal(csv_path)
         if signal is None:
             print(f"[GPU{gpu_id}] [{i}/{n}] [skip] 无 CH20: {os.path.basename(csv_path)}", flush=True)
+            continue
+        if len(signal) / fs < WIN_SEC:
+            print(f"[GPU{gpu_id}] [{i}/{n}] [skip] 时长 {len(signal)/fs:.1f}s < {WIN_SEC}s: {os.path.basename(csv_path)}", flush=True)
             continue
         print(f"[GPU{gpu_id}] [{i}/{n}] 推理: {os.path.basename(csv_path)}", flush=True)
         result[csv_path] = run_inference(signal, fs, model, device, infer_batch, step_sec)
