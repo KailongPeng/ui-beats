@@ -150,8 +150,14 @@ class ArmbandWindowDataset(Dataset):
             self._signals.append(signal)
             sig_idx = len(self._signals) - 1   # 当前信号在 _signals 中的下标
 
-            r_peaks = pd.read_csv(rec["rpeaks_path"])["sample_index"].values.astype(int)
-            qr = pd.read_csv(rec["quality_path"])
+            try:
+                r_peaks = pd.read_csv(rec["rpeaks_path"])["sample_index"].values.astype(int)
+                qr = pd.read_csv(rec["quality_path"])
+            except (pd.errors.EmptyDataError, pd.errors.ParserError, KeyError):
+                if verbose:
+                    print(f"[skip] 无法解析辅助CSV（空文件或缺少列）: {rec['stem']}")
+                self._signals.pop()   # 回滚刚追加的信号
+                continue
 
             for _, row in qr.iterrows():
                 is_good = bool(row["is_good"]) if "is_good" in qr.columns else True
