@@ -650,6 +650,55 @@ mean_uc ≈ (1/T) Σ<span class="dim">τ</span> [ <span class="hi">10·𝟙(eu<s
 </div>
 </section>
 
+<!-- ─── 2.8 实测验证 ─── -->
+<section>
+<div class="container">
+  <div class="section-label">2.8 · Real-World Validation</div>
+  <h2>实测：质量筛选带来的下游收益
+    <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.1em;color:var(--green);border:1px solid rgba(45,223,158,0.4);background:rgba(45,223,158,0.06);border-radius:2px;padding:3px 9px;margin-left:8px;vertical-align:middle">实测数据 · 非示意</span>
+  </h2>
+  <p class="lead">
+    在 3 名被试的上臂实测数据上，用一个简单下游模型衡量表现（<b>Pearson 相关系数</b>）。
+    对比<b>筛选前</b>（全部窗口）与<b>筛选后</b>（仅保留高质量片段）：
+    <b>3/3 被试相关系数全部提升</b>，subject3 提升最大（0.675 → 0.844，<b>+25%</b>）。
+    这是质量筛选有效性的直接证据 —— 把 Part 2 的"质量判据"从机制论证落到了可量化的下游收益。
+  </p>
+
+  <div class="grid3" style="margin-bottom:6px">
+    <div class="card" style="text-align:center;padding:18px">
+      <div class="mono" style="font-size:26px;color:var(--green);font-weight:600">3 / 3</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:5px">被试筛选后全部提升</div>
+    </div>
+    <div class="card" style="text-align:center;padding:18px">
+      <div class="mono" style="font-size:26px;color:var(--cyan);font-weight:600">+0.080</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:5px">平均相关系数提升</div>
+    </div>
+    <div class="card" style="text-align:center;padding:18px">
+      <div class="mono" style="font-size:26px;color:var(--green);font-weight:600">+0.169</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:5px">最大提升 · subject3 (+25%)</div>
+    </div>
+  </div>
+
+  <div class="figure">
+    <div class="fig-head">
+      <span class="fig-id">V13</span><span class="fig-title">筛选前后 Pearson 相关系数对比</span>
+      <span class="fig-illu" style="color:var(--green);border-color:rgba(45,223,158,0.4)">实测数据</span>
+    </div>
+    <canvas id="figV13" height="300"></canvas>
+    <div class="fig-cap">
+      每位被试一组：<b>筛选前</b>（琥珀，全部窗口）vs <b>筛选后</b>（绿，仅高质量片段；subject2/3 有两个分段）。
+      柱顶为实际数值、绿字为相对筛选前的提升量。<b>y 轴自 0.6 起以放大差异，具体数值以柱顶标注为准。</b>
+    </div>
+  </div>
+
+  <div class="insight">
+    <strong>为什么会提升：</strong>质量筛选剔除了运动伪迹 / 肌电污染的窗口，下游模型只在干净片段上拟合，
+    相关系数随之上升。提升幅度与被试原始信号质量相关 —— subject3 筛选前最低（0.675）、提升空间最大（+25%）；
+    subject1 本就较干净（0.887），提升较小（+0.038）但仍为正。
+  </div>
+</div>
+</section>
+
 <!-- ═══════════════ PART 3 ═══════════════ -->
 <div class="part-banner" style="background:rgba(167,121,255,0.03)">
   <div class="container">
@@ -1026,8 +1075,50 @@ function drawV11(){
   }
 }
 
+function drawV13(){
+  const cv=document.getElementById('figV13'); if(!cv)return; const {ctx,w,h}=fit(cv);
+  ctx.clearRect(0,0,w,h);
+  const groups=[
+    {name:'subject1', before:0.887, after:[0.925]},
+    {name:'subject2', before:0.736, after:[0.751,0.786]},
+    {name:'subject3', before:0.675, after:[0.844,0.843]}
+  ];
+  const ymin=0.6, ymax=0.95;
+  const padL=44, padR=16, padT=36, padB=40;
+  const plotW=w-padL-padR, ph=h-padT-padB;
+  const y=v=>padT+ph-(v-ymin)/(ymax-ymin)*ph;
+  // gridlines
+  for(let g=0.6; g<=0.9001; g+=0.1){
+    const gy=y(g);
+    ctx.strokeStyle='rgba(30,47,71,0.7)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(padL,gy); ctx.lineTo(padL+plotW,gy); ctx.stroke();
+    txt(ctx,g.toFixed(1),padL-8,gy+3,{color:C.dim,size:9,align:'right'});
+  }
+  txt(ctx,'Pearson r',padL-8,padT-14,{color:C.dim,size:9,align:'right'});
+  const groupW=plotW/groups.length;
+  for(let gi=0;gi<groups.length;gi++){
+    const G=groups[gi];
+    const bars=[{v:G.before,c:C.amber}].concat(G.after.map(v=>({v:v,c:C.green})));
+    const n=bars.length, bw=Math.min(groupW*0.62/n, 30), totalW=bw*n+(n-1)*6;
+    const startX=padL+groupW*gi+(groupW-totalW)/2;
+    for(let bi=0;bi<n;bi++){
+      const bx=startX+bi*(bw+6), by=y(bars[bi].v), bh=padT+ph-by;
+      ctx.fillStyle=bars[bi].c; ctx.globalAlpha=0.85; rrect(ctx,bx,by,bw,bh,3); ctx.fill(); ctx.globalAlpha=1;
+      txt(ctx,bars[bi].v.toFixed(3),bx+bw/2,by-6,{color:bars[bi].c,size:9.5,align:'center'});
+      if(bi>0){ const d=bars[bi].v-G.before; txt(ctx,'+'+d.toFixed(3),bx+bw/2,by-18,{color:C.green,size:8.5,align:'center'}); }
+    }
+    txt(ctx,G.name,padL+groupW*(gi+0.5),padT+ph+16,{color:C.text,size:10.5,align:'center'});
+  }
+  // legend (top-right, clear of tallest bars on the right group)
+  const lx=padL+plotW-128, ly=padT+2;
+  ctx.fillStyle=C.amber; rrect(ctx,lx,ly,10,10,2); ctx.fill();
+  txt(ctx,'筛选前',lx+15,ly+9,{color:C.dim,size:9.5});
+  ctx.fillStyle=C.green; rrect(ctx,lx+62,ly,10,10,2); ctx.fill();
+  txt(ctx,'筛选后',lx+77,ly+9,{color:C.dim,size:9.5});
+}
+
 function renderAll(){
-  drawV1();drawV2();drawV5();drawV6();drawV9();drawV10();drawV11();drawV12();
+  drawV1();drawV2();drawV5();drawV6();drawV9();drawV10();drawV11();drawV12();drawV13();
 }
 
 /* hero animated background */
