@@ -1,0 +1,1058 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UI_Beat · 上臂 ECG 质量筛选 · 原理与创新点</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #070b12;
+    --surface:  #0d1420;
+    --card:     #111c2e;
+    --border:   #1e2f47;
+    --cyan:     #00e5c8;
+    --cyan-dim: #00a896;
+    --amber:    #f5a623;
+    --green:    #2ddf9e;
+    --red:      #ff5757;
+    --blue:     #4a9eff;
+    --purple:   #a779ff;
+    --text:     #c8d8e8;
+    --text-dim: #5a7490;
+    --heading:  #eef4ff;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Noto Sans SC', sans-serif;
+    font-weight: 300;
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  code, .mono { font-family: 'IBM Plex Mono', monospace; }
+  .inline-code {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+    background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 2px;
+    color: var(--cyan-dim);
+  }
+
+  /* ─── Hero ─── */
+  .hero { position: relative; padding: 70px 0 46px; overflow: hidden; border-bottom: 1px solid var(--border); }
+  .ecg-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0.16; }
+  .hero-inner { position: relative; max-width: 1100px; margin: 0 auto; padding: 0 40px; }
+
+  .tag {
+    display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+    letter-spacing: 0.12em; color: var(--cyan); background: rgba(0,229,200,0.08);
+    border: 1px solid rgba(0,229,200,0.25); padding: 4px 12px; border-radius: 2px;
+    margin-bottom: 20px; text-transform: uppercase;
+  }
+  .hero h1 {
+    font-family: 'Syne', sans-serif; font-size: clamp(28px, 4vw, 46px); font-weight: 800;
+    color: var(--heading); line-height: 1.16; letter-spacing: -0.02em; max-width: 780px;
+  }
+  .hero h1 span { color: var(--cyan); }
+  .hero-sub { margin-top: 16px; font-size: 14px; color: var(--text-dim); max-width: 640px; }
+  .hero-sub b { color: var(--text); font-weight: 500; }
+
+  .hero-tags { margin-top: 22px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.04em;
+    color: var(--text); background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+    padding: 4px 11px; border-radius: 20px;
+  }
+  .pill.cy { color: var(--cyan); border-color: rgba(0,229,200,0.3); background: rgba(0,229,200,0.06); }
+
+  .hero-stats { margin-top: 28px; display: flex; gap: 36px; flex-wrap: wrap; }
+  .hstat .v { font-family: 'IBM Plex Mono', monospace; font-size: 24px; font-weight: 600; color: var(--cyan); line-height: 1; }
+  .hstat .k { font-size: 11px; color: var(--text-dim); margin-top: 5px; }
+
+  /* ─── Layout ─── */
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 40px; }
+  section { padding: 58px 0; border-bottom: 1px solid var(--border); }
+
+  .part-banner { padding: 30px 0 6px; }
+  .part-banner .container { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; }
+  .part-num {
+    font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 800; letter-spacing: 0.06em;
+    padding: 5px 12px; border-radius: 3px;
+  }
+  .part-num.p1 { color: var(--cyan); background: rgba(0,229,200,0.1); border: 1px solid rgba(0,229,200,0.3); }
+  .part-num.p2 { color: var(--amber); background: rgba(245,166,35,0.1); border: 1px solid rgba(245,166,35,0.3); }
+  .part-num.p3 { color: var(--purple); background: rgba(167,121,255,0.1); border: 1px solid rgba(167,121,255,0.3); }
+  .part-num.p4 { color: var(--blue); background: rgba(74,158,255,0.1); border: 1px solid rgba(74,158,255,0.3); }
+  .part-title { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 700; color: var(--heading); }
+  .part-tag {
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.12em;
+    text-transform: uppercase; padding: 3px 9px; border-radius: 2px; margin-left: auto;
+  }
+  .part-tag.paper { color: var(--text-dim); border: 1px solid var(--border); }
+  .part-tag.ours  { color: var(--amber); border: 1px solid rgba(245,166,35,0.4); background: rgba(245,166,35,0.06); }
+
+  .section-label {
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--cyan-dim); margin-bottom: 10px;
+  }
+  h2 { font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 700; color: var(--heading); letter-spacing: -0.01em; margin-bottom: 10px; }
+  h3 { font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 600; color: var(--heading); margin-bottom: 14px; }
+  .lead { font-size: 14px; color: var(--text-dim); max-width: 760px; margin-bottom: 28px; line-height: 1.8; }
+  .lead b { color: var(--text); font-weight: 500; }
+  p { font-size: 13.5px; color: var(--text-dim); line-height: 1.8; }
+
+  /* ─── Cards ─── */
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 24px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }
+  @media (max-width: 800px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
+
+  .micro-label {
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.15em;
+    color: var(--text-dim); text-transform: uppercase; margin-bottom: 10px;
+  }
+
+  /* ─── Figure ─── */
+  .figure { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 22px 24px 18px; margin: 24px 0; }
+  .figure canvas { width: 100%; display: block; }
+  .fig-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .fig-id { font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600; color: var(--cyan); }
+  .fig-title { font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; color: var(--heading); }
+  .fig-illu {
+    margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.1em;
+    color: var(--amber); border: 1px solid rgba(245,166,35,0.35); border-radius: 2px; padding: 2px 7px;
+  }
+  .fig-cap { font-size: 12px; color: var(--text-dim); margin-top: 12px; line-height: 1.65; }
+  .fig-cap b { color: var(--text); font-weight: 500; }
+
+  /* ─── Formula ─── */
+  .formula {
+    font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--text);
+    background: rgba(0,0,0,0.25); border: 1px solid var(--border); border-left: 2px solid var(--cyan-dim);
+    border-radius: 3px; padding: 12px 16px; margin: 12px 0; overflow-x: auto; line-height: 1.9;
+  }
+  .formula .dim { color: var(--text-dim); }
+  .formula .hi  { color: var(--cyan); }
+
+  /* ─── Uncertainty cards ─── */
+  .u-card { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 22px; }
+  .u-card.e { border-top: 2px solid var(--red); }
+  .u-card.a { border-top: 2px solid var(--amber); }
+  .u-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .u-sym { font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 600; }
+  .u-sym.e { color: var(--red); } .u-sym.a { color: var(--amber); }
+  .u-name { font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; color: var(--heading); }
+  .u-tag { font-size: 11px; color: var(--text-dim); }
+
+  /* ─── Table ─── */
+  .data-table { width: 100%; border-collapse: collapse; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; }
+  .data-table th {
+    text-align: left; padding: 10px 14px; color: var(--text-dim); font-size: 10px;
+    letter-spacing: 0.12em; text-transform: uppercase; border-bottom: 1px solid var(--border); font-weight: 500;
+  }
+  .data-table td { padding: 11px 14px; border-bottom: 1px solid rgba(30,47,71,0.6); color: var(--text); vertical-align: top; }
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table tr:hover td { background: rgba(255,255,255,0.02); }
+  .data-table .ours td { color: var(--amber); }
+  .data-table .paper td { color: var(--text-dim); }
+  .tbl-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; overflow-x: auto; }
+  .num { color: var(--cyan); font-weight: 600; }
+
+  .status-dot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:6px; vertical-align: middle; }
+  .dot-green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot-amber { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+  .dot-red   { background: var(--red); box-shadow: 0 0 6px var(--red); }
+
+  /* ─── Flow steps (CSS diagram) ─── */
+  .flow { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+  .flow-step { flex: 1; min-width: 150px; padding: 18px 16px; border-right: 1px solid var(--border); position: relative; }
+  .flow-step:last-child { border-right: none; }
+  .flow-step .s-n { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--text-dim); margin-bottom: 8px; }
+  .flow-step .s-t { font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 700; color: var(--heading); margin-bottom: 7px; }
+  .flow-step .s-d { font-size: 11px; color: var(--text-dim); line-height: 1.6; }
+  .flow-step.red   { background: rgba(255,87,87,0.04); }
+  .flow-step.amber { background: rgba(245,166,35,0.04); }
+
+  /* ─── Innovation block ─── */
+  .innov { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 26px 28px; margin: 22px 0; position: relative; }
+  .innov.star { border-color: rgba(245,166,35,0.4); background: linear-gradient(135deg, rgba(245,166,35,0.05), var(--card)); }
+  .innov-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .innov-no { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600; color: var(--amber); }
+  .innov-title { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 700; color: var(--heading); }
+  .innov-star { color: var(--amber); font-size: 14px; }
+  .innov p { margin-bottom: 8px; }
+  .innov p b { color: var(--text); font-weight: 500; }
+  .ref { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--cyan-dim); margin-top: 10px; }
+
+  .warnbox {
+    background: rgba(245,166,35,0.06); border-left: 2px solid var(--amber); border-radius: 2px;
+    padding: 12px 16px; margin: 14px 0; font-size: 12.5px; color: var(--text); line-height: 1.7;
+  }
+  .warnbox b { color: var(--amber); font-weight: 500; }
+
+  .insight {
+    background: rgba(0,229,200,0.04); border: 1px solid rgba(0,229,200,0.15); border-radius: 4px;
+    padding: 16px 20px; margin: 22px 0; font-size: 13px; color: var(--text); line-height: 1.7;
+  }
+  .insight strong { color: var(--cyan); font-weight: 500; }
+
+  /* domain transfer */
+  .dom { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+  .dom-box { flex: 1; min-width: 220px; border-radius: 6px; padding: 22px; border: 1px solid var(--border); }
+  .dom-box.src { background: rgba(74,158,255,0.05); border-color: rgba(74,158,255,0.3); }
+  .dom-box.dst { background: rgba(245,166,35,0.05); border-color: rgba(245,166,35,0.3); }
+  .dom-box h4 { font-family: 'Syne', sans-serif; font-size: 14px; color: var(--heading); margin-bottom: 4px; }
+  .dom-box .sub { font-size: 11px; color: var(--text-dim); margin-bottom: 14px; }
+  .dom-box ul { list-style: none; display: flex; flex-direction: column; gap: 7px; }
+  .dom-box li { font-size: 12px; color: var(--text-dim); display: flex; gap: 8px; }
+  .dom-arrow {
+    flex: 0 0 180px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 8px; padding: 0 8px;
+  }
+  @media (max-width: 800px) { .dom-arrow { flex-basis: auto; padding: 18px 0; } }
+  .dom-arrow .zlabel { font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 800; color: var(--cyan); letter-spacing: 0.02em; }
+  .dom-arrow .line { width: 100%; height: 2px; background: linear-gradient(90deg, var(--blue), var(--amber)); position: relative; }
+  .dom-arrow .line::after { content:'▶'; position:absolute; right:-2px; top:-8px; color: var(--amber); font-size: 12px; }
+  .dom-arrow .nos { display: flex; flex-direction: column; gap: 4px; align-items: center; }
+  .dom-arrow .no { font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: var(--red); }
+
+  /* AND gate */
+  .gate-wrap { display: flex; align-items: center; gap: 0; flex-wrap: wrap; }
+  .gate-in { display: flex; flex-direction: column; gap: 14px; flex: 0 0 280px; }
+  .gate-cond {
+    background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 4px; padding: 12px 16px;
+  }
+  .gate-cond .c-t { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text); }
+  .gate-cond .c-d { font-size: 11px; color: var(--text-dim); margin-top: 3px; }
+  .gate-mid { flex: 0 0 120px; display: flex; align-items: center; justify-content: center; }
+  .gate-and {
+    width: 78px; height: 78px; border-radius: 50%; border: 2px solid var(--cyan);
+    background: rgba(0,229,200,0.06); display: flex; align-items: center; justify-content: center;
+    font-family: 'Syne', sans-serif; font-weight: 800; font-size: 15px; color: var(--cyan);
+  }
+  .gate-out { flex: 1; min-width: 160px; }
+  .gate-out .o-box {
+    background: rgba(45,223,158,0.08); border: 1px solid rgba(45,223,158,0.35); border-radius: 4px;
+    padding: 16px; text-align: center;
+  }
+  .gate-out .o-box .ot { font-family: 'Syne', sans-serif; font-weight: 700; color: var(--green); font-size: 16px; }
+  .gate-out .o-box .od { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+
+  /* contribution list */
+  .contrib { display: flex; flex-direction: column; gap: 12px; }
+  .contrib-item { display: flex; gap: 14px; align-items: flex-start; background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 16px 20px; }
+  .contrib-n { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 18px; color: var(--amber); flex-shrink: 0; width: 26px; }
+  .contrib-t { font-size: 13px; color: var(--text); line-height: 1.65; }
+  .contrib-t b { color: var(--heading); font-weight: 500; }
+
+  /* gallery */
+  .gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 900px) { .gallery { grid-template-columns: 1fr; } }
+  .gcard { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 16px; }
+  .gcard canvas { width: 100%; display: block; border-radius: 3px; }
+  .gcard .gt { font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 700; color: var(--heading); margin-bottom: 10px; display:flex; align-items:center; gap:8px;}
+  .gcard .gd { font-size: 11px; color: var(--text-dim); margin-top: 10px; line-height: 1.55; }
+
+  footer {
+    padding: 30px 40px; border-top: 1px solid var(--border); max-width: 1100px; margin: 0 auto;
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;
+  }
+  footer span { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-dim); }
+
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(16px);} to { opacity:1; transform: translateY(0);} }
+  .fade-up { animation: fadeUp 0.6s ease both; }
+  .delay-1 { animation-delay: 0.1s; } .delay-2 { animation-delay: 0.2s; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ HERO ═══════════════ -->
+<div class="hero">
+  <canvas class="ecg-canvas" id="heroCanvas"></canvas>
+  <div class="hero-inner">
+    <div class="tag fade-up">UI_Beat · Armband ECG · 原理与创新点</div>
+    <h1 class="fade-up delay-1">用 <span>不确定性</span> 给上臂心电"质检"<br>临床训练 → 可穿戴零样本筛选</h1>
+    <p class="hero-sub fade-up delay-1">
+      基于 <b>PN-QRS</b> 的不确定性估计，把一个只在 <b>CPSC2019 临床 ECG</b> 上训练过的模型，
+      <b>零样本</b>迁移到 <b>上臂单导联（CH20）</b> 可穿戴信号，自动筛出高质量 10 秒片段。
+      本报告分两部分：<b>原理</b>（PN-QRS，来自论文）与<b>创新点</b>（UI_Beat_share 的贡献）。
+    </p>
+    <div class="hero-tags fade-up delay-2">
+      <span class="pill cy">跨域零样本</span>
+      <span class="pill">单导联 CH20</span>
+      <span class="pill">U_E + U_A 联合判据</span>
+      <span class="pill">Otsu 自适应阈值</span>
+      <span class="pill">两阶段全局池化</span>
+      <span class="pill">部署级工具链</span>
+    </div>
+    <div class="hero-stats fade-up delay-2">
+      <div class="hstat"><div class="v">348<span style="font-size:14px">KB</span></div><div class="k">附带预训练权重</div></div>
+      <div class="hstat"><div class="v">0<span style="font-size:14px"> 行</span></div><div class="k">模型代码改动</div></div>
+      <div class="hstat"><div class="v">+1170</div><div class="k">新增管线代码</div></div>
+      <div class="hstat"><div class="v">30 段</div><div class="k">上臂实测数据</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ PART 1 BANNER ═══════════════ -->
+<div class="part-banner" style="background:rgba(0,229,200,0.02)">
+  <div class="container">
+    <span class="part-num p1">PART 1</span>
+    <span class="part-title">原理 · PN-QRS 不确定性机制</span>
+    <span class="part-tag paper">来自论文 · 非本仓库贡献</span>
+  </div>
+</div>
+
+<!-- ─── 1.1 问题背景 ─── -->
+<section>
+<div class="container">
+  <div class="section-label">1.1 · Problem</div>
+  <h2>为什么上臂心电必须先"质检"</h2>
+  <p class="lead">
+    医院 12 导联 ECG 信号干净，P/Q/R/S/T 波清晰。但<b>上臂单导联</b>离心脏远、经肌肉骨骼衰减，
+    叠加运动伪迹与肌电噪声 —— 很多 10 秒窗口根本不可用。若不先筛掉坏窗口，
+    下游训练/推理会被噪声污染。<b>质量评估必须前置。</b>
+  </p>
+
+  <div class="figure">
+    <div class="fig-head">
+      <span class="fig-id">V1</span><span class="fig-title">临床 ECG vs 上臂 ECG</span>
+      <span class="fig-illu">示意图</span>
+    </div>
+    <canvas id="figV1" height="280"></canvas>
+    <div class="fig-cap">
+      <b>上</b>：临床导联，P/Q/R/S/T 形态清晰、基线平稳。
+      <b>下</b>：上臂 CH20，R 峰尚存但 P/T 波微弱，叠加<b>基线漂移</b>（低频起伏）与<b>肌电噪声</b>（高频毛刺）。
+      同一段时间，下方信号的可读性显著下降 —— 这正是需要不确定性来量化的对象。
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ─── 1.2 + 1.3 两种不确定性 ─── -->
+<section>
+<div class="container">
+  <div class="section-label">1.2 / 1.3 · Two Uncertainties</div>
+  <h2>模型怎么"知道自己不确定"</h2>
+  <p class="lead">
+    PN-QRS（名字来自 <b>P</b>ositive–<b>N</b>egative）对每帧特征做正变换 φ⁺ 与负变换 φ⁻，产生"乐观/悲观分身"，
+    再用 MC-Dropout 多次前向。两个分身的<b>分歧</b>给出两种不确定性，物理含义完全不同：
+  </p>
+
+  <div class="grid2">
+    <div class="u-card e">
+      <div class="u-head"><span class="u-sym e">U<sub>E</sub></span>
+        <div><div class="u-name">认知不确定性 · Epistemic</div><div class="u-tag">"这段到底是不是 ECG？"</div></div></div>
+      <p style="margin-bottom:12px">
+        <b>粒度：窗口级标量</b>（对 T 帧求均值）。衡量整段信号与训练分布的距离 ——
+        输入 PPG、心音或纯噪声时分身分歧巨大，U<sub>E</sub> 飙升。用于 <b>OoD 筛查</b>：整段非 ECG 则丢弃。
+      </p>
+      <div class="formula">
+U<span class="dim">E</span> = (1/T) Σ<span class="dim">τ</span> [ ŷ⁺·log(ŷ⁺/ŷ) + ŷ⁻·log(ŷ⁻/ŷ) ]
+<span class="dim">                — 对正负变换前后预测分布求 KL 散度（公式 5）</span>
+      </div>
+      <p class="mono" style="font-size:11px;color:var(--text-dim)">论文阈值 α = 0.1</p>
+    </div>
+
+    <div class="u-card a">
+      <div class="u-head"><span class="u-sym a">U<sub>A</sub></span>
+        <div><div class="u-name">偶然不确定性 · Aleatoric</div><div class="u-tag">"这一拍清不清楚？"</div></div></div>
+      <p style="margin-bottom:12px">
+        <b>粒度：帧级序列</b>（T 个值，与时间轴对齐）。衡量每一帧预测的模糊度 ——
+        某处心拍形态特殊（室早、束支阻滞）时该帧熵高。用于<b>逐拍判定</b>：标记可疑心拍，信号保留。
+      </p>
+      <div class="formula">
+U<span class="dim">A</span> = −[ ŷ⁺·log ŷ⁺ + (1−ŷ⁻)·log(1−ŷ⁻) ]
+<span class="dim">                — 每帧相对正负变换的预测熵（公式 6）</span>
+      </div>
+      <p class="mono" style="font-size:11px;color:var(--text-dim)">论文阈值 β = 0.12 · 取 R 峰前后 7 帧均值</p>
+    </div>
+  </div>
+
+  <div class="figure">
+    <div class="fig-head">
+      <span class="fig-id">V2 ★</span><span class="fig-title">不确定性在波形上的物理意义</span>
+      <span class="fig-illu">示意图</span>
+    </div>
+    <canvas id="figV2" height="340"></canvas>
+    <div class="fig-cap">
+      <b>顶部</b>：一段含噪声区间的 ECG。<b>中条 U_A</b>（帧级）：在噪声帧与那个形态异常的可疑心拍处变红。
+      <b>底条 U_E</b>（窗口级）：把整段打成一个标量并广播 —— 噪声窗口整体偏红、干净窗口偏绿。
+      颜色越红 = 越不确定。两条带分别对应"逐拍可疑"与"整段 OoD"。
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ─── 1.4 Algorithm 1 ─── -->
+<section>
+<div class="container">
+  <div class="section-label">1.4 · Algorithm 1</div>
+  <h2>论文推理流程：先筛整段，再标逐拍</h2>
+
+  <div class="figure" style="padding-bottom:22px">
+    <div class="fig-head"><span class="fig-id">V3</span><span class="fig-title">PN-QRS 推理流程</span></div>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="s-n">STEP 1–2</div><div class="s-t">编码 + PN 变换</div>
+        <div class="s-d">每导联送入多分支 CNN → 逐帧 logits ŷ；φ⁺/φ⁻ 产生 ŷ⁺ / ŷ⁻</div>
+      </div>
+      <div class="flow-step red">
+        <div class="s-n" style="color:var(--red)">STEP 3–5 · 窗口级</div><div class="s-t">U<sub>E</sub> 筛 OoD</div>
+        <div class="s-d">U<sub>E</sub> &gt; α → 整段是非 ECG 噪声，丢弃该导联</div>
+      </div>
+      <div class="flow-step">
+        <div class="s-n">STEP 6–10 · 多导联</div><div class="s-t">逐帧选最优导联</div>
+        <div class="s-d">U = U<sub>E</sub>+U<sub>A</sub>，每帧选 U 最小的导联 → R 峰序列</div>
+      </div>
+      <div class="flow-step amber">
+        <div class="s-n" style="color:var(--amber)">STEP 11–14 · 帧级</div><div class="s-t">U<sub>A</sub> 标可疑拍</div>
+        <div class="s-d">每个 R 峰取前后 7 帧 U<sub>A</sub> 均值，&gt; β → 标记可疑心拍</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tbl-wrap">
+    <table class="data-table">
+      <thead><tr><th>指标</th><th>粒度</th><th>论文阈值</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td style="color:var(--red)">U<sub>E</sub> 认知</td><td>窗口级标量</td><td>α = 0.1</td><td>判断整段是否为 non-ECG（OoD 筛查）</td></tr>
+        <tr><td style="color:var(--amber)">U<sub>A</sub> 偶然</td><td>帧级序列 (T)</td><td>β = 0.12</td><td>判断每个心拍是否为可疑伪迹</td></tr>
+        <tr><td style="color:var(--text-dim)">U<sub>E</sub>+U<sub>A</sub></td><td>帧级序列 (T)</td><td>—</td><td>仅用于多导联逐帧选最优导联，<b>论文中不作为质量分数输出</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top:14px;font-size:12.5px">
+    📌 记住这张表 —— 论文里 U<sub>E</sub>/U<sub>A</sub> 粒度与用途各自独立，<b>从未合并成一个窗口质量分数</b>。
+    下一部分 2.2 会看到，本仓库恰恰在这里做了一个关键的工程改写。
+  </p>
+</div>
+</section>
+
+<!-- ═══════════════ PART 2 BANNER ═══════════════ -->
+<div class="part-banner" style="background:rgba(245,166,35,0.03)">
+  <div class="container">
+    <span class="part-num p2">PART 2</span>
+    <span class="part-title">创新点 · UI_Beat_share 的贡献</span>
+    <span class="part-tag ours">★ 本仓库原创</span>
+  </div>
+</div>
+
+<section>
+<div class="container">
+  <p class="lead" style="margin-top:4px">
+    以下七项是本仓库在<b>完全不改动 PN-QRS 模型核心（0 行）</b>的前提下，
+    面向上臂可穿戴场景做出的原创设计。每一项都标注了对应代码位置。
+  </p>
+
+  <!-- 2.1 cross-domain -->
+  <div class="innov star">
+    <div class="innov-head"><span class="innov-no">2.1</span><span class="innov-title">跨域零样本迁移</span><span class="innov-star">★ 最强创新</span></div>
+    <p>
+      随仓库附带的权重 <span class="inline-code">best_model.pt</span>（348 KB）<b>只见过 CPSC2019 临床 ECG</b>
+      （胸导联、干净、500 Hz、静态）。它被直接用于<b>上臂 CH20 可穿戴信号</b>（运动伪迹、肌电、信号弱、非标准电极），
+      <b>无 fine-tune、无 domain adaptation、无目标域标注</b>，依然能靠不确定性区分高/低质量窗口。
+    </p>
+    <p>这反而是更强的学术论点：PN-QRS 的不确定性估计具备<b>跨域泛化能力</b> —— 原论文只在同域（CPSC→MIT-BIH）评测，从未涉及上臂场景。</p>
+
+    <div class="figure" style="margin-bottom:6px">
+      <div class="fig-head"><span class="fig-id">V4 ★</span><span class="fig-title">训练域 → 部署域：零样本跨越</span></div>
+      <div class="dom">
+        <div class="dom-box src">
+          <h4>训练域 · CPSC2019</h4><div class="sub">模型唯一见过的数据</div>
+          <ul>
+            <li><span class="status-dot dot-green"></span>临床单导联 ECG</li>
+            <li><span class="status-dot dot-green"></span>干净 · 500 Hz · 静态</li>
+            <li><span class="status-dot dot-green"></span>2000 条标注记录</li>
+          </ul>
+        </div>
+        <div class="dom-arrow">
+          <div class="zlabel">零样本迁移</div>
+          <div class="line"></div>
+          <div class="nos">
+            <span class="no">✗ 无 fine-tune</span>
+            <span class="no">✗ 无 domain adaptation</span>
+            <span class="no">✗ 无目标域标注</span>
+          </div>
+        </div>
+        <div class="dom-box dst">
+          <h4>部署域 · 上臂 CH20</h4><div class="sub">从未训练过的可穿戴信号</div>
+          <ul>
+            <li><span class="status-dot dot-amber"></span>上臂单导联 · 信号弱</li>
+            <li><span class="status-dot dot-red"></span>运动伪迹 + 肌电噪声</li>
+            <li><span class="status-dot dot-amber"></span>非标准电极位置</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="ref">权重来源：experiments/logs_real/zy2lki18/models/best_model.pt（wandb run zy2lki18，原训练代码在 CPSC2019 上训练）</div>
+  </div>
+
+  <!-- 2.2 single-channel metric -->
+  <div class="innov">
+    <div class="innov-head"><span class="innov-no">2.2</span><span class="innov-title">单通道质量判据 mean(U_E + U_A)</span></div>
+    <p>
+      原版 <span class="inline-code">multi_lead_select</span> 依赖<b>多导联交叉投票</b>决定可信度；上臂只有一路电极，该机制失效。
+      本仓库改用<b>单通道 <span class="inline-code">mean(U_E + U_A)</span></b> 作自评估：U_E 反映"模型不确定"，U_A 反映"信号本身糟糕"，相加同时捕捉两者。
+    </p>
+    <p>
+      关键工程细节：代码对逐帧认知项做了<b>二值化</b> <span class="inline-code">eu[eu &gt; 0.12] = 10</span>，
+      于是 <span class="inline-code">mean_uc</span> 的本质变成<b>噪声帧占比的加权计数</b>：
+    </p>
+    <div class="formula">
+mean_uc ≈ (1/T) Σ<span class="dim">τ</span> [ <span class="hi">10·𝟙(eu<span class="dim">τ</span> &gt; 0.12)</span> + au<span class="dim">τ</span> ]
+<span class="dim">         干净窗口 ≈ 0.1–0.5   ·   电极脱落 → ≈ 10   ·   故意制造悬殊双峰</span>
+    </div>
+
+    <div class="figure" style="margin-bottom:8px">
+      <div class="fig-head"><span class="fig-id">V5</span><span class="fig-title">mean_uc 如何形成双峰</span><span class="fig-illu">示意图</span></div>
+      <canvas id="figV5" height="250"></canvas>
+      <div class="fig-cap">
+        逐帧 eu 曲线（左）→ 经 <b>eu&gt;0.12 打成 10</b> 的二值化（中）→ 对全窗求均值 → 干净窗与噪声窗在直方图上形成<b>悬殊双峰</b>（右）。
+        正是这种二值化放大效应，让后续 Otsu 阈值可信。
+      </div>
+    </div>
+
+    <div class="warnbox">
+      <b>⚠️ 诚实标注（critical reading）：</b>这套 <span class="inline-code">mean_uc</span> 是<b>工程改写，并非论文 Algorithm 1 的原始定义</b>。
+      论文中 U_E 是窗口级标量（与 α=0.1 比较）、U_A 是帧级序列（与 β=0.12 比较），两者从不合并为质量分数；
+      代码把 β=0.12 挪用于 eu 的逐帧二值化。功能等价（噪声越多分数越高），但实现路径与论文不同。
+    </div>
+    <div class="ref">参考 pipeline/extract_quality_segments.py:161-179（uncertain_est / en_est / mi_est 组合）</div>
+  </div>
+
+  <!-- 2.3 Otsu -->
+  <div class="innov">
+    <div class="innov-head"><span class="innov-no">2.3</span><span class="innov-title">Otsu 自适应阈值 · 解决域漂移</span></div>
+    <p>
+      上臂 ECG 的 <span class="inline-code">mean_uc</span> 分布整体高于医院 12 导联（肌电、运动伪迹）。
+      原版固定阈值 <span class="inline-code">UC_THR=1.0</span> 直接套用会把 90% 数据判成 bad。
+      本仓库用<b>一维 Otsu 二值化</b>自动最大化"好/坏窗口"的组间方差，阈值随数据分布自适应。
+    </p>
+    <div class="figure" style="margin-bottom:8px">
+      <div class="fig-head"><span class="fig-id">V6</span><span class="fig-title">Otsu 在双峰直方图上的最优分割</span><span class="fig-illu">示意图</span></div>
+      <canvas id="figV6" height="250"></canvas>
+      <div class="fig-cap">
+        mean_uc 双峰直方图。竖线为 Otsu 自动求得的阈值：左侧绿色判 <b>good</b>、右侧红色判 <b>bad</b>。
+        固定阈值 1.0（灰色虚线）在上臂数据上会偏到左峰内，误杀大量好窗口。
+      </div>
+    </div>
+    <div class="ref">pipeline/extract_quality_segments.py:85-114（otsu_threshold，O(n) 累积和实现）</div>
+  </div>
+
+  <!-- 2.4 two-stage pooling -->
+  <div class="innov">
+    <div class="innov-head"><span class="innov-no">2.4</span><span class="innov-title">两阶段全局池化 · 统一跨被试标尺</span></div>
+    <p>
+      每段 30 秒短录制只有 3~4 个滑窗，单文件做 Otsu 样本太少、阈值不稳。本仓库改为<b>两阶段</b>：
+      先全量推理把所有窗口的 uc 池化到一起，对全局求一个 Otsu 阈值，再回填到每个窗口判定。
+    </p>
+    <div class="figure" style="padding-bottom:22px">
+      <div class="fig-head"><span class="fig-id">V7</span><span class="fig-title">两阶段批处理流程</span></div>
+      <div class="flow">
+        <div class="flow-step">
+          <div class="s-n">PASS · 1</div><div class="s-t">全量推理 + 池化</div>
+          <div class="s-d">所有 CSV 跑推理 → 收集每个滑窗的 mean_uc → 汇入全局池</div>
+        </div>
+        <div class="flow-step" style="background:rgba(0,229,200,0.04)">
+          <div class="s-n" style="color:var(--cyan)">GLOBAL</div><div class="s-t">全局 Otsu</div>
+          <div class="s-d">对 pooled uc 计算单一阈值 → 跨被试 uc 标尺统一</div>
+        </div>
+        <div class="flow-step">
+          <div class="s-n">PASS · 2</div><div class="s-t">回填 + 判定</div>
+          <div class="s-d">逐窗 is_good 判定 → 保存 NPZ 片段 + 可视化</div>
+        </div>
+      </div>
+    </div>
+    <div class="ref">pipeline/extract_quality_segments.py:770-834（_worker_infer + _worker_process）</div>
+  </div>
+
+  <!-- 2.5 dual check -->
+  <div class="innov">
+    <div class="innov-head"><span class="innov-no">2.5</span><span class="innov-title">双重校验 · 不确定性 + 心拍数合理性</span></div>
+    <p>
+      仅靠 uc 阈值可能误判 —— 信号嘈杂到模型"自信地预测很多假 R 峰"时 uc 反而低。
+      本仓库增加<b>生理合理性校验</b>：10 秒内心拍数须落在 [5, 25]（≈30–150 bpm）。两条件<b>同时满足</b>才算 good。
+    </p>
+    <div class="figure" style="padding-bottom:24px">
+      <div class="fig-head"><span class="fig-id">V8</span><span class="fig-title">双重校验逻辑</span></div>
+      <div class="gate-wrap">
+        <div class="gate-in">
+          <div class="gate-cond"><div class="c-t">mean_uc ≤ uc_thr</div><div class="c-d">不确定性低于 Otsu 阈值</div></div>
+          <div class="gate-cond"><div class="c-t">5 ≤ n_beats ≤ 25</div><div class="c-d">心拍数生理合理（≈30–150 bpm）</div></div>
+        </div>
+        <div class="gate-mid"><div class="gate-and">AND</div></div>
+        <div class="gate-out"><div class="o-box"><div class="ot">is_good = True</div><div class="od">该 10 秒片段保存为 NPZ</div></div></div>
+      </div>
+    </div>
+    <div class="ref">pipeline/extract_quality_segments.py:47-48, 184-188（BEAT_MIN=5, BEAT_MAX=25）</div>
+  </div>
+
+  <!-- 2.6 activity -->
+  <div class="innov">
+    <div class="innov-head"><span class="innov-no">2.6</span><span class="innov-title">活动级汇总 · 哪些动作最易出伪迹</span></div>
+    <p>
+      本仓库自动从目录路径提取 <b>被试 × 活动</b> 维度，按活动聚合统计 good_ratio。
+      实测：<b>慢走、站立坐下</b> 的 good_ratio 最低，符合"动作越大、运动伪迹越多"的生理直觉。
+    </p>
+    <div class="figure" style="margin-bottom:8px">
+      <div class="fig-head"><span class="fig-id">V9</span><span class="fig-title">各活动 good_ratio 对比</span><span class="fig-illu">示意数据</span></div>
+      <canvas id="figV9" height="260"></canvas>
+      <div class="fig-cap">
+        5 种日常活动的高质量窗口占比（示意值）。静态动作（坐姿抬手、坐姿说话）保留率高；
+        大幅动作（慢走、站立坐下）显著偏低 —— 这类活动级洞察是原版完全没有的工程维度。
+      </div>
+    </div>
+    <div class="ref">pipeline/extract_quality_segments.py:763-765, 895-910</div>
+  </div>
+
+  <!-- 2.7 toolchain -->
+  <div class="innov">
+    <div class="innov-head"><span class="innov-no">2.7</span><span class="innov-title">部署级工具链</span></div>
+    <p>原版只有研究评测脚本（依赖标准数据集命名约定），无法处理真实用户数据。本仓库新增一套生产入口：</p>
+    <div class="grid3" style="margin-top:14px">
+      <div class="card" style="padding:18px">
+        <div class="micro-label">并行</div>
+        <div style="font-family:'Syne';font-weight:700;color:var(--heading);font-size:13px;margin-bottom:6px">多 GPU spawn 分片</div>
+        <p style="font-size:11.5px">文件按 <span class="inline-code">[i::n_gpus]</span> 轮询分配；spawn 上下文避免 CUDA 冲突</p>
+      </div>
+      <div class="card" style="padding:18px">
+        <div class="micro-label">吞吐</div>
+        <div style="font-family:'Syne';font-weight:700;color:var(--heading);font-size:13px;margin-bottom:6px">批量 GPU forward</div>
+        <p style="font-size:11.5px">默认 <span class="inline-code">infer_batch=16</span>，相比逐窗推理 5–10× 加速</p>
+      </div>
+      <div class="card" style="padding:18px">
+        <div class="micro-label">鲁棒性</div>
+        <div style="font-family:'Syne';font-weight:700;color:var(--heading);font-size:13px;margin-bottom:6px">鲁棒 CSV 读取</div>
+        <p style="font-size:11.5px">以首行列数为准截断尾部空列，避免 ParserError</p>
+      </div>
+      <div class="card" style="padding:18px">
+        <div class="micro-label">产出</div>
+        <div style="font-family:'Syne';font-weight:700;color:var(--heading);font-size:13px;margin-bottom:6px">NPZ 自包含片段</div>
+        <p style="font-size:11.5px">每个 good 片段含信号 + fs + r_peaks + mean_uc，直接对接下游</p>
+      </div>
+      <div class="card" style="padding:18px">
+        <div class="micro-label">诊断</div>
+        <div style="font-family:'Syne';font-weight:700;color:var(--heading);font-size:13px;margin-bottom:6px">三类可视化</div>
+        <p style="font-size:11.5px">overview / segments / uc-distribution（见 Part 4）</p>
+      </div>
+      <div class="card" style="padding:18px">
+        <div class="micro-label">入口</div>
+        <div style="font-family:'Syne';font-weight:700;color:var(--heading);font-size:13px;margin-bottom:6px">一键 run.sh</div>
+        <p style="font-size:11.5px"><span class="inline-code">bash run.sh --data_dir X --fs 1000</span></p>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ═══════════════ PART 3 ═══════════════ -->
+<div class="part-banner" style="background:rgba(167,121,255,0.03)">
+  <div class="container">
+    <span class="part-num p3">PART 3</span>
+    <span class="part-title">学术定位与贡献清单</span>
+  </div>
+</div>
+
+<section>
+<div class="container">
+  <div class="section-label">3.1 · Original vs This Repo</div>
+  <h2>原版 UI_Beat vs 本仓库</h2>
+  <div class="tbl-wrap" style="margin-bottom:32px">
+    <table class="data-table">
+      <thead><tr><th>维度</th><th>原始 UI_Beat（论文实现）</th><th>UI_Beat_share（本仓库）</th></tr></thead>
+      <tbody>
+        <tr><td>定位</td><td class="paper" style="color:var(--text-dim)">论文方法参考实现</td><td style="color:var(--amber)">工业部署级工具</td></tr>
+        <tr><td>目标信号</td><td style="color:var(--text-dim)">研究用标准 ECG（CPSC/MIT-BIH…）</td><td style="color:var(--amber)">上臂单导联 CH20 可穿戴</td></tr>
+        <tr><td>模型–数据</td><td style="color:var(--text-dim)">同域评测</td><td style="color:var(--amber)">跨域零样本迁移</td></tr>
+        <tr><td>阈值机制</td><td style="color:var(--text-dim)">固定值（超参搜索）</td><td style="color:var(--amber)">Otsu 自适应 + 两阶段池化</td></tr>
+        <tr><td>批处理 / 多 GPU</td><td style="color:var(--text-dim)">无（串行）</td><td style="color:var(--amber)">spawn 多进程 + 分片调度</td></tr>
+        <tr><td>可视化</td><td style="color:var(--text-dim)">无</td><td style="color:var(--amber)">三类诊断图</td></tr>
+        <tr><td>预训练权重</td><td style="color:var(--text-dim)">需自行训练</td><td style="color:var(--amber)">✅ 附带 CPSC2019 权重</td></tr>
+        <tr><td>模型代码改动</td><td style="color:var(--text-dim)">—</td><td style="color:var(--green)">0 行（完全保留原方法）</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section-label">3.2 · Claimable Contributions</div>
+  <h2 style="margin-bottom:22px">6 条可量化贡献</h2>
+  <div class="contrib">
+    <div class="contrib-item"><div class="contrib-n">1</div><div class="contrib-t"><b>证明 PN-QRS 的 CPSC2019 模型可零样本迁移到上臂可穿戴 ECG</b> —— 原论文只在同域临床数据集评测，未涉及上臂场景。</div></div>
+    <div class="contrib-item"><div class="contrib-n">2</div><div class="contrib-t"><b>首次将 PN-QRS 不确定性用于上臂单导联 ECG 的质量评估</b>（非 QRS 检测精度本身）。</div></div>
+    <div class="contrib-item"><div class="contrib-n">3</div><div class="contrib-t"><b>提出 Otsu 自适应阈值 + 两阶段全局池化</b>，解决可穿戴数据的 uc 域漂移问题。</div></div>
+    <div class="contrib-item"><div class="contrib-n">4</div><div class="contrib-t"><b>提出 U_E + U_A 联合指标 + 心拍数合理性双重校验</b> 的单通道质量判据。</div></div>
+    <div class="contrib-item"><div class="contrib-n">5</div><div class="contrib-t"><b>发布首个小规模上臂 ECG × 5 日常活动质量评估基准</b>（30 段，可复现）。</div></div>
+    <div class="contrib-item"><div class="contrib-n">6</div><div class="contrib-t"><b>提供完整部署级开源工具链</b>（多 GPU 并行 + 三类可视化 + NPZ 输出 + 活动级汇总 + 附带权重）。</div></div>
+  </div>
+
+  <div class="insight" style="margin-top:30px">
+    <strong>诚信边界声明：</strong>
+    <span style="color:var(--text-dim)">属于 PN-QRS（论文）</span> —— MC-Dropout、U_E/U_A 定义、Algorithm 1、QRS 检测网络。
+    <span style="color:var(--amber)">属于 UI_Beat_share（本仓库）</span> —— 跨域零样本迁移的验证、单通道 mean(U_E+U_A) 判据、
+    eu&gt;0.12 二值化工程改写、Otsu 自适应阈值、两阶段全局池化、双重校验、活动级汇总、部署级工具链、上臂实测基准。
+  </div>
+</div>
+</section>
+
+<!-- ═══════════════ PART 4 ═══════════════ -->
+<div class="part-banner" style="background:rgba(74,158,255,0.03)">
+  <div class="container">
+    <span class="part-num p4">PART 4</span>
+    <span class="part-title">诊断可视化图廊</span>
+    <span class="part-tag" style="color:var(--amber);border:1px solid rgba(245,166,35,0.4)">示意 · 接入真实数据后替换</span>
+  </div>
+</div>
+
+<section>
+<div class="container">
+  <p class="lead" style="margin-top:4px">
+    工具链为每段录制生成三类诊断图。下方为<b>示意版</b>（合成信号），真实运行
+    <span class="inline-code">bash run.sh --viz</span> 后会以实测 PNG 替换。
+  </p>
+  <div class="gallery">
+    <div class="gcard">
+      <div class="gt"><span class="fig-id">V10</span> 全局概览 overview</div>
+      <canvas id="figV10" height="200"></canvas>
+      <div class="gd">完整信号 + R 峰点 + 好坏窗口着色 + 不确定性曲线。</div>
+    </div>
+    <div class="gcard">
+      <div class="gt"><span class="fig-id">V11</span> 高质量片段 segments</div>
+      <canvas id="figV11" height="200"></canvas>
+      <div class="gd">每个 good 窗口单独子图，带 R 峰红点与心率标注。</div>
+    </div>
+    <div class="gcard">
+      <div class="gt"><span class="fig-id">V12</span> UC 分布 distribution</div>
+      <canvas id="figV12" height="200"></canvas>
+      <div class="gd">直方图 + Otsu 阈值线 + 双峰/单峰可信度判定。</div>
+    </div>
+  </div>
+</div>
+</section>
+
+<footer>
+  <span>UI_Beat_share · 上臂 ECG 质量筛选 · 原理与创新点 · 2026-05-30</span>
+  <span>基于 mato00/UI_Beat（PN-QRS）· 图表为示意，非实测结果</span>
+</footer>
+
+<script>
+/* ════════ Canvas 工具库 ════════ */
+function fit(cv){
+  const dpr = window.devicePixelRatio || 1;
+  // capture the design height ONCE — setting cv.height later mutates the attribute,
+  // so re-reads would otherwise compound on every resize (HiDPI bug)
+  if(!cv.dataset.h) cv.dataset.h = cv.getAttribute('height') || '240';
+  const cssH = +cv.dataset.h;
+  const cssW = cv.clientWidth || cv.parentElement.clientWidth || 600;
+  cv.width = cssW * dpr; cv.height = cssH * dpr;
+  cv.style.height = cssH + 'px';
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  return { ctx, w: cssW, h: cssH };
+}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function gauss(x,mu,s){const d=(x-mu)/s;return Math.exp(-0.5*d*d);}
+
+/* 合成 ECG：返回 {sig, peaks} */
+function makeECG(dur, fs, opt){
+  opt = opt || {};
+  const hr = opt.hr||70, amp=opt.amp==null?1:opt.amp, pAmp=opt.pAmp==null?1:opt.pAmp, tAmp=opt.tAmp==null?1:opt.tAmp;
+  const rng = opt.rng||Math.random;
+  const n = Math.round(dur*fs), sig = new Float32Array(n), peaks=[];
+  const rr = 60/hr;
+  let r = rr*0.6;
+  while(r < dur-0.2){ peaks.push(r); r += rr*(0.94+0.12*rng()); }
+  for(let i=0;i<n;i++){
+    const t=i/fs; let v=0;
+    for(let k=0;k<peaks.length;k++){
+      const tt = t-peaks[k];
+      if(Math.abs(tt)<0.42){
+        v += 0.10*pAmp*gauss(tt,-0.16,0.020)
+           - 0.12*gauss(tt,-0.025,0.007)
+           + 1.00*gauss(tt,0,0.009)
+           - 0.25*gauss(tt,0.028,0.009)
+           + 0.30*tAmp*gauss(tt,0.18,0.045);
+      }
+    }
+    sig[i]=v*amp;
+  }
+  return { sig, peaks, fs, n };
+}
+function addNoise(sig, fs, opt){
+  const rng=opt.rng||Math.random, bw=opt.bw||0, emg=opt.emg||0;
+  const n=sig.length, i0=Math.floor((opt.from||0)*n), i1=Math.floor((opt.to==null?1:opt.to)*n);
+  let walk=0;
+  for(let i=i0;i<i1;i++){
+    const t=i/fs;
+    if(bw) sig[i]+= bw*Math.sin(2*Math.PI*0.28*t+0.7) + bw*0.4*Math.sin(2*Math.PI*0.12*t);
+    if(emg){ walk = walk*0.6 + (rng()*2-1); sig[i]+= emg*walk; }
+  }
+}
+/* 画 1D 信号 */
+function plot(ctx, sig, x, y, w, h, opt){
+  opt=opt||{};
+  let mn=Infinity,mx=-Infinity;
+  for(let i=0;i<sig.length;i++){ if(sig[i]<mn)mn=sig[i]; if(sig[i]>mx)mx=sig[i]; }
+  if(opt.ymin!=null)mn=opt.ymin; if(opt.ymax!=null)mx=opt.ymax;
+  const pad=(mx-mn)*0.12||1; mn-=pad; mx+=pad;
+  ctx.beginPath();
+  for(let i=0;i<sig.length;i++){
+    const px=x + w*i/(sig.length-1);
+    const py=y + h - (sig[i]-mn)/(mx-mn)*h;
+    i?ctx.lineTo(px,py):ctx.moveTo(px,py);
+  }
+  ctx.strokeStyle=opt.color||'#00e5c8'; ctx.lineWidth=opt.lw||1.3;
+  ctx.lineJoin='round'; ctx.lineCap='round'; ctx.stroke();
+  return {mn,mx};
+}
+/* 不确定性热色 0..1 绿→琥珀→红 */
+function heat(v){
+  v=Math.max(0,Math.min(1,v)); let c;
+  if(v<0.5){const t=v/0.5; c=[45+(245-45)*t,223+(166-223)*t,158+(35-158)*t];}
+  else{const t=(v-0.5)/0.5; c=[245+(255-245)*t,166+(87-166)*t,35+(57-35)*t];}
+  return 'rgb('+c.map(Math.round).join(',')+')';
+}
+function strip(ctx, vals, x, y, w, h){
+  const n=vals.length;
+  for(let i=0;i<n;i++){ ctx.fillStyle=heat(vals[i]); ctx.fillRect(x+w*i/n, y, w/n+1, h); }
+}
+function txt(ctx,s,x,y,opt){
+  opt=opt||{};
+  ctx.fillStyle=opt.color||'#5a7490';
+  ctx.font=(opt.size||11)+"px 'IBM Plex Mono', monospace";
+  ctx.textAlign=opt.align||'left'; ctx.textBaseline=opt.base||'alphabetic';
+  ctx.fillText(s,x,y);
+}
+function rrect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+
+const C = { cyan:'#00e5c8', cyanD:'#00a896', amber:'#f5a623', green:'#2ddf9e', red:'#ff5757', blue:'#4a9eff', dim:'#5a7490', text:'#c8d8e8', border:'#1e2f47' };
+
+/* ════════ 各图绘制 ════════ */
+function drawV1(){
+  const cv=document.getElementById('figV1'); if(!cv)return; const {ctx,w,h}=fit(cv);
+  ctx.clearRect(0,0,w,h);
+  const rng=mulberry32(7);
+  const clean=makeECG(6,200,{hr:72,rng:mulberry32(3)});
+  const arm  =makeECG(6,200,{hr:72,pAmp:0.35,tAmp:0.5,amp:0.85,rng:mulberry32(3)});
+  addNoise(arm.sig,200,{bw:0.18,emg:0.05,rng:rng,from:0,to:1});
+  const padX=54, plotW=w-padX-20, rowH=(h-70)/2;
+  txt(ctx,'临床 ECG',8,28+rowH*0.5,{color:C.blue,size:12});
+  plot(ctx,clean.sig,padX,24,plotW,rowH,{color:C.cyan,lw:1.4});
+  txt(ctx,'上臂 CH20',8,52+rowH*1.5,{color:C.amber,size:12});
+  plot(ctx,arm.sig,padX,48+rowH,plotW,rowH,{color:C.amber,lw:1.3});
+  txt(ctx,'P/Q/R/S/T 清晰 · 基线平稳',padX,18,{color:C.dim,size:10});
+  txt(ctx,'R 峰尚存 · P/T 微弱 · 基线漂移 + 肌电噪声',padX,42+rowH,{color:C.dim,size:10});
+}
+
+function drawV2(){
+  const cv=document.getElementById('figV2'); if(!cv)return; const {ctx,w,h}=fit(cv);
+  ctx.clearRect(0,0,w,h);
+  const fs=200, dur=8, rng=mulberry32(11);
+  const e=makeECG(dur,fs,{hr:70,rng:mulberry32(5)});
+  // inject noisy region 42%-60%
+  addNoise(e.sig,fs,{bw:0.05,emg:0.32,rng:rng,from:0.42,to:0.60});
+  const padX=58, plotW=w-padX-16, sigH=150;
+  // signal
+  plot(ctx,e.sig,padX,16,plotW,sigH,{color:C.cyan,lw:1.3});
+  txt(ctx,'ECG',8,16+sigH*0.5,{color:C.text,size:12});
+  // build U_A frame-level: high in noise region + one suspicious beat ~22%
+  const n=e.sig.length, ua=new Float32Array(n), ue=new Float32Array(n);
+  for(let i=0;i<n;i++){
+    const f=i/n; let a=0.12+0.05*rng();
+    if(f>0.42&&f<0.60) a=0.7+0.3*rng();         // noisy frames
+    if(Math.abs(f-0.22)<0.012) a=0.78;          // suspicious beat
+    ua[i]=a;
+    ue[i]=(f>0.42&&f<0.60)?0.85:0.18;           // window-level broadcast
+  }
+  const sY=16+sigH+18, sH=42, gap=30;
+  txt(ctx,'U_A 帧级',8,sY+sH*0.5-4,{color:C.amber,size:11});
+  txt(ctx,'(逐拍可疑)',8,sY+sH*0.5+12,{color:C.dim,size:9});
+  strip(ctx,ua,padX,sY,plotW,sH);
+  txt(ctx,'U_E 窗口级',8,sY+sH+gap+sH*0.5-4,{color:C.red,size:11});
+  txt(ctx,'(整段 OoD)',8,sY+sH+gap+sH*0.5+12,{color:C.dim,size:9});
+  strip(ctx,ue,padX,sY+sH+gap,plotW,sH);
+  // legend
+  const lx=padX+plotW-150, ly=h-14;
+  for(let i=0;i<=20;i++){ctx.fillStyle=heat(i/20);ctx.fillRect(lx+i*5,ly-8,5,8);}
+  txt(ctx,'低',lx-4,ly,{color:C.green,size:9,align:'right'});
+  txt(ctx,'高',lx+105,ly,{color:C.red,size:9});
+}
+
+function drawV5(){
+  const cv=document.getElementById('figV5'); if(!cv)return; const {ctx,w,h}=fit(cv);
+  ctx.clearRect(0,0,w,h);
+  const colW=(w-2*40)/3, top=30, ph=h-top-44;
+  const rng=mulberry32(9);
+  // panel 1: per-frame eu curve
+  const n=140, eu=[];
+  for(let i=0;i<n;i++){ let v=0.04+0.03*rng(); if((i>40&&i<58)||(i>92&&i<100)) v=0.18+0.12*rng(); eu.push(v); }
+  let x0=8;
+  txt(ctx,'① 逐帧 eu',x0,20,{color:C.text,size:11});
+  // threshold line 0.12
+  const p1y=top, p1h=ph;
+  ctx.strokeStyle='rgba(245,166,35,0.5)';ctx.setLineDash([4,3]);
+  const thY=p1y+p1h-(0.12/0.32)*p1h;
+  ctx.beginPath();ctx.moveTo(x0,thY);ctx.lineTo(x0+colW,thY);ctx.stroke();ctx.setLineDash([]);
+  txt(ctx,'0.12',x0+colW,thY-3,{color:C.amber,size:9,align:'right'});
+  plot(ctx,eu,x0,p1y,colW,p1h,{color:C.cyan,lw:1.2,ymin:0,ymax:0.32});
+  // arrow
+  txt(ctx,'→',x0+colW+14,top+ph*0.5,{color:C.dim,size:18});
+  // panel 2: binarized
+  x0=40+colW;
+  txt(ctx,'② eu>0.12 → 10',x0,20,{color:C.text,size:11});
+  const bin=eu.map(v=>v>0.12?10:v);
+  plot(ctx,bin,x0,top,colW,ph,{color:C.amber,lw:1.2,ymin:0,ymax:10.5});
+  txt(ctx,'噪声帧打到 10',x0,h-26,{color:C.dim,size:9});
+  txt(ctx,'→',x0+colW+14,top+ph*0.5,{color:C.dim,size:18});
+  // panel 3: bimodal histogram of mean_uc
+  x0=2*40+2*colW;
+  txt(ctx,'③ mean_uc 双峰',x0,20,{color:C.text,size:11});
+  const bins=[0.18,0.34,0.20,0.06,0.02,0.01,0.0,0.02,0.05,0.11,0.07];
+  const bw=colW/bins.length, mxb=Math.max.apply(null,bins);
+  for(let i=0;i<bins.length;i++){
+    const bh=bins[i]/mxb*ph; const col=i<5?C.green:C.red;
+    ctx.fillStyle=col; ctx.globalAlpha=0.75;
+    ctx.fillRect(x0+i*bw+1, top+ph-bh, bw-2, bh); ctx.globalAlpha=1;
+  }
+  txt(ctx,'干净',x0,h-26,{color:C.green,size:9});
+  txt(ctx,'噪声',x0+colW,h-26,{color:C.red,size:9,align:'right'});
+}
+
+function drawHistOtsu(cvId, opt){
+  const cv=document.getElementById(cvId); if(!cv)return; const {ctx,w,h}=fit(cv);
+  ctx.clearRect(0,0,w,h);
+  const padX=40, padB=34, top=18, plotW=w-padX-16, ph=h-top-padB;
+  const bins=opt.bins, bw=plotW/bins.length, mxb=Math.max.apply(null,bins);
+  const thrIdx=opt.thrIdx;
+  for(let i=0;i<bins.length;i++){
+    const bh=bins[i]/mxb*ph; const col=i<thrIdx?C.green:C.red;
+    ctx.fillStyle=col; ctx.globalAlpha=0.72;
+    ctx.fillRect(padX+i*bw+1, top+ph-bh, bw-2, bh); ctx.globalAlpha=1;
+  }
+  // axis
+  ctx.strokeStyle=C.border;ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(padX,top+ph);ctx.lineTo(padX+plotW,top+ph);ctx.stroke();
+  // Otsu line
+  const ox=padX+thrIdx*bw;
+  ctx.strokeStyle=C.amber;ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(ox,top-2);ctx.lineTo(ox,top+ph);ctx.stroke();
+  txt(ctx,opt.thrLabel||'Otsu 阈值',ox+5,top+8,{color:C.amber,size:10});
+  if(opt.fixedIdx!=null){
+    const fx=padX+opt.fixedIdx*bw;
+    ctx.strokeStyle='rgba(120,140,165,0.5)';ctx.setLineDash([4,3]);
+    ctx.beginPath();ctx.moveTo(fx,top);ctx.lineTo(fx,top+ph);ctx.stroke();ctx.setLineDash([]);
+    txt(ctx,'固定 1.0',fx-5,top+ph+0,{color:C.dim,size:9,align:'right'});
+  }
+  txt(ctx,'mean_uc →',padX,h-10,{color:C.dim,size:10});
+  if(opt.left)txt(ctx,opt.left,padX+plotW*0.18,top+ph+22,{color:C.green,size:10,align:'center'});
+  if(opt.right)txt(ctx,opt.right,padX+plotW*0.82,top+ph+22,{color:C.red,size:10,align:'center'});
+}
+
+function drawV6(){
+  drawHistOtsu('figV6',{
+    bins:[0.04,0.10,0.22,0.30,0.21,0.10,0.04,0.03,0.05,0.10,0.14,0.11,0.06,0.03],
+    thrIdx:8, fixedIdx:4, thrLabel:'Otsu', left:'good', right:'bad'
+  });
+}
+function drawV12(){
+  drawHistOtsu('figV12',{
+    bins:[0.05,0.14,0.28,0.26,0.14,0.06,0.02,0.03,0.06,0.12,0.16,0.10,0.05,0.02],
+    thrIdx:8, thrLabel:'Otsu · 双峰可信', left:'good', right:'bad'
+  });
+}
+
+function drawV9(){
+  const cv=document.getElementById('figV9'); if(!cv)return; const {ctx,w,h}=fit(cv);
+  ctx.clearRect(0,0,w,h);
+  const data=[['坐姿抬手',0.92],['坐姿说话',0.86],['坐姿摇臂',0.64],['慢走',0.41],['站立坐下',0.33]];
+  const top=16, padB=40, padL=20, plotW=w-padL-20, ph=h-top-padB;
+  const bw=plotW/data.length;
+  for(let i=0;i<data.length;i++){
+    const val=data[i][1], bh=val*ph;
+    const col = val>0.8?C.green : val>0.5?C.amber : C.red;
+    ctx.fillStyle=col; ctx.globalAlpha=0.8;
+    rrect(ctx,padL+i*bw+bw*0.18, top+ph-bh, bw*0.64, bh, 3); ctx.fill(); ctx.globalAlpha=1;
+    txt(ctx,(val*100).toFixed(0)+'%',padL+i*bw+bw*0.5, top+ph-bh-6,{color:col,size:12,align:'center'});
+    txt(ctx,data[i][0],padL+i*bw+bw*0.5, top+ph+16,{color:C.dim,size:10,align:'center'});
+  }
+  ctx.strokeStyle=C.border;ctx.beginPath();ctx.moveTo(padL,top+ph);ctx.lineTo(padL+plotW,top+ph);ctx.stroke();
+  txt(ctx,'good_ratio',padL,top+8,{color:C.dim,size:10});
+}
+
+function drawV10(){
+  const cv=document.getElementById('figV10'); if(!cv)return; const {ctx,w,h}=fit(cv);
+  ctx.clearRect(0,0,w,h);
+  const fs=160,dur=14,rng=mulberry32(21);
+  const e=makeECG(dur,fs,{hr:74,rng:mulberry32(13)});
+  addNoise(e.sig,fs,{bw:0.06,emg:0.3,rng:rng,from:0.55,to:0.78});
+  const padX=8, plotW=w-16, sigY=20, sigH=h-78;
+  // window shading: 4 windows; mark window 3 bad
+  const nWin=4, good=[true,true,false,true];
+  for(let k=0;k<nWin;k++){
+    ctx.fillStyle = good[k]?'rgba(45,223,158,0.06)':'rgba(255,87,87,0.08)';
+    ctx.fillRect(padX+plotW*k/nWin, sigY, plotW/nWin, sigH);
+  }
+  plot(ctx,e.sig,padX,sigY,plotW,sigH,{color:C.cyan,lw:1.0});
+  // R peaks
+  for(let k=0;k<e.peaks.length;k++){
+    const px=padX+plotW*(e.peaks[k]/dur);
+    ctx.fillStyle=C.red; ctx.beginPath(); ctx.arc(px,sigY+sigH*0.18,2.2,0,7); ctx.fill();
+  }
+  // uncertainty curve below
+  const uy=sigY+sigH+10, uh=30, n=200;
+  ctx.beginPath();
+  for(let i=0;i<n;i++){ const f=i/n; let u=0.2+0.05*rng(); if(f>0.55&&f<0.78)u=0.8; const px=padX+plotW*f, py=uy+uh-u*uh; i?ctx.lineTo(px,py):ctx.moveTo(px,py);}
+  ctx.strokeStyle=C.amber;ctx.lineWidth=1.2;ctx.stroke();
+  txt(ctx,'信号 + R峰',padX,14,{color:C.dim,size:9});
+  txt(ctx,'不确定性',padX,uy+uh+12,{color:C.amber,size:9});
+}
+
+function drawV11(){
+  const cv=document.getElementById('figV11'); if(!cv)return; const {ctx,w,h}=fit(cv);
+  ctx.clearRect(0,0,w,h);
+  const cols=3, gap=10, cw=(w-gap*(cols-1))/cols, top=24, ch=h-top-26;
+  const hrs=[72,68,80];
+  for(let c=0;c<cols;c++){
+    const x=c*(cw+gap);
+    ctx.strokeStyle=C.border;ctx.lineWidth=1; rrect(ctx,x,top,cw,ch,4); ctx.stroke();
+    const e=makeECG(3,160,{hr:hrs[c],rng:mulberry32(30+c*7)});
+    plot(ctx,e.sig,x+4,top+6,cw-8,ch-12,{color:C.cyan,lw:1.1});
+    for(let k=0;k<e.peaks.length;k++){const px=x+4+(cw-8)*(e.peaks[k]/3);ctx.fillStyle=C.red;ctx.beginPath();ctx.arc(px,top+6+(ch-12)*0.16,2,0,7);ctx.fill();}
+    txt(ctx,'seg'+c,x+4,top-6,{color:C.dim,size:9});
+    txt(ctx,hrs[c]+' bpm',x+cw-4,top-6,{color:C.green,size:9,align:'right'});
+  }
+}
+
+function renderAll(){
+  drawV1();drawV2();drawV5();drawV6();drawV9();drawV10();drawV11();drawV12();
+}
+
+/* hero animated background */
+(function(){
+  const cv=document.getElementById('heroCanvas'); if(!cv)return; const ctx=cv.getContext('2d');
+  function rs(){cv.width=cv.offsetWidth;cv.height=cv.offsetHeight;} rs(); window.addEventListener('resize',rs);
+  function beat(cx,cy,sc,xs){
+    const pts=[[0,0],[0.05,0],[0.08,-0.08],[0.1,0],[0.14,0],[0.17,-0.03],[0.20,-0.05],[0.22,-0.08],[0.235,-0.1],[0.25,0.8],[0.265,-0.2],[0.28,-0.05],[0.30,-0.02],[0.33,0.15],[0.38,0.18],[0.45,0.12],[0.52,0],[0.60,0],[1,0]];
+    ctx.beginPath();ctx.moveTo(cx+pts[0][0]*xs,cy-pts[0][1]*sc);
+    for(let i=1;i<pts.length;i++)ctx.lineTo(cx+pts[i][0]*xs,cy-pts[i][1]*sc);
+    ctx.strokeStyle='#00e5c8';ctx.lineWidth=1.5;ctx.stroke();
+  }
+  let off=0;
+  function draw(){
+    ctx.clearRect(0,0,cv.width,cv.height); const bw=220,hh=cv.height,rows=3;
+    for(let r=0;r<rows;r++){const cy=(hh/rows)*(r+0.5);ctx.globalAlpha=0.6-r*0.15;const sx=-(bw-(off*bw*0.3)%bw);for(let x=sx;x<cv.width+bw;x+=bw)beat(x,cy,28,bw);}
+    ctx.globalAlpha=1;off+=0.008;requestAnimationFrame(draw);
+  } draw();
+})();
+
+let rt;
+window.addEventListener('resize',function(){clearTimeout(rt);rt=setTimeout(renderAll,150);});
+if(document.fonts&&document.fonts.ready){document.fonts.ready.then(renderAll);}
+window.addEventListener('load',renderAll);
+renderAll();
+</script>
+</body>
+</html>
